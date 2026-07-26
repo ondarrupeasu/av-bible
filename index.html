@@ -4,7 +4,14 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AV Bible — Interactive Audiovisual Reference</title>
-  <style>* { margin: 0; padding: 0; box-sizing: border-box; }</style>
+  <style>
+/* Scrollbars finos unificados (estilo casa) */
+*{scrollbar-width:thin;scrollbar-color:rgba(140,140,150,.45) transparent}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(140,140,150,.45);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:rgba(140,140,150,.7)}
+::-webkit-scrollbar-corner{background:transparent}* { margin: 0; padding: 0; box-sizing: border-box; }</style>
 </head>
 <body>
   <div id="root"></div>
