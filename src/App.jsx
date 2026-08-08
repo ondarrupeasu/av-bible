@@ -1821,6 +1821,52 @@ function ModuleTimecode() {
         <StatBadge label="Mode" value={df?"Drop-frame":"Non-drop"}/>
         <StatBadge label="Separator" value={df&&(fps===30||fps===60)?";":","}/>
       </div>
+
+      {/* Drop-frame visual explainer */}
+      <div style={{marginTop:20,background:"#0d1117",border:"1px solid #1f2937",borderRadius:10,padding:"16px 18px"}}>
+        <div style={{color:"#f59e0b",fontSize:13,fontWeight:"bold",fontFamily:"monospace",marginBottom:8}}>What is drop-frame?</div>
+        <p style={{color:"#d1d5db",fontSize:13,lineHeight:1.6,margin:"0 0 14px"}}>
+          NTSC video runs at <strong>29.97 fps</strong>, but timecode counts a whole <strong>30 frames every second</strong>.
+          Counting 30 when only 29.97 actually happen makes the timecode run <strong>ahead of the real clock</strong> —
+          about <strong style={{color:"#f87171"}}>+3.6 s every hour</strong>. <strong>Drop-frame</strong> fixes this by
+          <em> skipping the frame numbers</em> <code style={{color:"#f59e0b"}}>;00</code> and <code style={{color:"#f59e0b"}}>;01</code> at
+          the start of every minute — <strong>except every 10th minute</strong>. (No actual video frames are lost — only frame
+          <em> numbers</em> are skipped.) 24, 25 and true 30 fps are always non-drop.
+        </p>
+        {/* drift bars */}
+        <div style={{marginBottom:14}}>
+          {[["Real clock, 1 h",100,"#34d399","01:00:00"],["Non-drop TC after 1 h real time",100.1,"#f59e0b","01:00:03;18 (ahead)"]].map(([lbl,w,col,val])=>(
+            <div key={lbl} style={{marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#9ca3af",fontFamily:"monospace",marginBottom:2}}>
+                <span>{lbl}</span><span style={{color:col}}>{val}</span>
+              </div>
+              <div style={{height:10,background:"#1f2937",borderRadius:5,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${w}%`,maxWidth:"100%",background:col,opacity:0.8}}/>
+              </div>
+            </div>
+          ))}
+          <div style={{fontSize:11,color:"#f87171",fontFamily:"monospace",marginTop:2}}>↑ without drop-frame, timecode drifts ahead of real time</div>
+        </div>
+        {/* minute skip pattern */}
+        <div style={{color:"#6b7280",fontSize:11,fontFamily:"monospace",marginBottom:6}}>At each new minute (29.97 DF):</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {Array.from({length:11},(_,m)=>{
+            const keep=m%10===0;
+            return (
+              <div key={m} style={{
+                minWidth:64,padding:"6px 8px",borderRadius:6,textAlign:"center",fontFamily:"monospace",fontSize:11,
+                background:keep?"#12261a":"#2a1416",border:`1px solid ${keep?"#34d39955":"#f8717155"}`,
+              }}>
+                <div style={{color:"#9ca3af"}}>min {String(m).padStart(2,"0")}</div>
+                <div style={{color:keep?"#34d399":"#f87171",fontWeight:"bold",marginTop:2}}>{keep?"keep all":"skip ;00 ;01"}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{fontSize:11,color:"#6b7280",fontFamily:"monospace",marginTop:8}}>
+          2 frames × 54 minutes (all but every 10th) = <strong style={{color:"#e5e7eb"}}>108 frame numbers skipped per hour</strong> → timecode = wall-clock time.
+        </div>
+      </div>
     </div>
   );
 }
