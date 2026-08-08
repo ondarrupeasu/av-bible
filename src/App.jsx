@@ -643,111 +643,100 @@ function ModulePictureProfiles({ image }) {
 // ─────────────────────────────────────────────
 // MODULE: Color Spaces & Gamuts
 // ─────────────────────────────────────────────
+// Gamut primaries in CIE 1931 xy (verified against colour-science datasets)
 const GAMUTS = {
-  "sRGB / Rec.709": { color:"#60a5fa", points:[[0.64,0.33],[0.30,0.60],[0.15,0.06]], note:"Standard for web, consumer displays, HD broadcast (ITU-R BT.709)" },
-  "DCI-P3":         { color:"#34d399", points:[[0.68,0.32],[0.265,0.69],[0.15,0.06]], note:"Digital cinema projection (SMPTE ST 2087). ~25% wider than Rec.709" },
-  "Rec.2020":       { color:"#f59e0b", points:[[0.708,0.292],[0.170,0.797],[0.131,0.046]], note:"UHDTV / HDR standard (ITU-R BT.2020). Covers ~75% of visible spectrum" },
-  "ACES AP1":       { color:"#a78bfa", points:[[0.713,0.293],[0.165,0.830],[0.128,0.044]], note:"ACES working/grading space (ACEScct). Covers near-Rec.2020 gamut" },
-  "ACES AP0":       { color:"#f472b6", points:[[0.7347,0.2653],[0.0000,1.0000],[0.0001,-0.0770]], note:"ACES scene-referred exchange space. Encompasses entire visible spectrum" },
+  "sRGB / Rec.709": { color:"#60a5fa", points:[[0.640,0.330],[0.300,0.600],[0.150,0.060]], note:"Web, consumer displays, HD broadcast (ITU-R BT.709)." },
+  "DCI-P3":         { color:"#34d399", points:[[0.680,0.320],[0.265,0.690],[0.150,0.060]], note:"Digital cinema projection (SMPTE ST 2087). ~25% wider than Rec.709." },
+  "Rec.2020":       { color:"#f59e0b", points:[[0.708,0.292],[0.170,0.797],[0.131,0.046]], note:"UHDTV / HDR target (ITU-R BT.2020). ~75% of the visible spectrum." },
+  "DaVinci WG":     { color:"#22d3ee", points:[[0.8000,0.3130],[0.1682,0.9877],[0.0790,-0.1155]], note:"DaVinci Wide Gamut — Resolve's internal working space." },
+  "ARRI AWG3":      { color:"#a3e635", points:[[0.6840,0.3130],[0.2210,0.8480],[0.0861,-0.1020]], note:"ARRI ALEXA Wide Gamut 3 — the camera's native encoding." },
+  "Sony SG3.Cine":  { color:"#fb923c", points:[[0.766,0.275],[0.225,0.800],[0.089,-0.087]], note:"Sony S-Gamut3.Cine — practical cine variant of S-Gamut3." },
+  "Canon Cinema":   { color:"#e879f9", points:[[0.7400,0.2700],[0.1700,1.1400],[0.0800,-0.1000]], note:"Canon Cinema Gamut — its green primary is imaginary (beyond the visible spectrum)." },
+  "RED Wide Gamut": { color:"#ef4444", points:[[0.780308,0.304253],[0.121595,1.493994],[0.095612,-0.084589]], note:"REDWideGamutRGB — very large; green sits far beyond the visible spectrum." },
+  "ACES AP1":       { color:"#a78bfa", points:[[0.713,0.293],[0.165,0.830],[0.128,0.044]], note:"ACES working/grading gamut (ACEScc / ACEScct)." },
+  "ACES AP0":       { color:"#f9a8d4", points:[[0.7347,0.2653],[0.0000,1.0000],[0.0001,-0.0770]], note:"ACES AP0 — scene-referred exchange space; encloses the entire visible spectrum (SMPTE ST 2065-1)." },
 };
 
+// Real CIE 1931 spectral locus (2° observer), 380–700 nm every 5 nm → (x,y)
+const CIE_LOCUS = [
+  [0.1741,0.0050],[0.1740,0.0050],[0.1738,0.0049],[0.1736,0.0049],[0.1733,0.0048],
+  [0.1730,0.0048],[0.1726,0.0048],[0.1721,0.0048],[0.1714,0.0051],[0.1703,0.0058],
+  [0.1689,0.0069],[0.1669,0.0086],[0.1644,0.0109],[0.1611,0.0138],[0.1566,0.0177],
+  [0.1510,0.0227],[0.1440,0.0297],[0.1355,0.0399],[0.1241,0.0578],[0.1096,0.0868],
+  [0.0913,0.1327],[0.0687,0.2007],[0.0454,0.2950],[0.0235,0.4127],[0.0082,0.5384],
+  [0.0039,0.6548],[0.0139,0.7502],[0.0389,0.8120],[0.0743,0.8338],[0.1142,0.8262],
+  [0.1547,0.8059],[0.1929,0.7816],[0.2296,0.7543],[0.2658,0.7243],[0.3016,0.6923],
+  [0.3373,0.6589],[0.3731,0.6245],[0.4087,0.5896],[0.4441,0.5547],[0.4788,0.5202],
+  [0.5125,0.4866],[0.5448,0.4544],[0.5752,0.4242],[0.6029,0.3965],[0.6270,0.3725],
+  [0.6482,0.3514],[0.6658,0.3340],[0.6801,0.3197],[0.6915,0.3083],[0.7006,0.2993],
+  [0.7079,0.2920],[0.7140,0.2859],[0.7190,0.2809],[0.7230,0.2770],[0.7260,0.2740],
+  [0.7283,0.2717],[0.7300,0.2700],[0.7311,0.2689],[0.7320,0.2680],[0.7327,0.2673],
+  [0.7334,0.2666],[0.7340,0.2660],[0.7344,0.2656],[0.7346,0.2654],[0.7347,0.2653],
+];
+// Chromaticity (x,y) → displayable sRGB (D65). Out-of-gamut clamped + normalised.
+function cieXYtoRGB(x,y){
+  if(y<=0) return null;
+  const X=x/y, Y=1, Z=(1-x-y)/y;
+  let r= 3.2406*X -1.5372*Y -0.4986*Z, g=-0.9689*X +1.8758*Y +0.0415*Z, b= 0.0557*X -0.2040*Y +1.0570*Z;
+  r=Math.max(0,r); g=Math.max(0,g); b=Math.max(0,b);
+  const m=Math.max(r,g,b); if(m>0){ r/=m; g/=m; b/=m; }
+  const enc=v=> v<=0.0031308 ? 12.92*v : 1.055*Math.pow(v,1/2.4)-0.055;
+  return [Math.round(enc(r)*255),Math.round(enc(g)*255),Math.round(enc(b)*255)];
+}
+
 function ModuleColorSpaces() {
-  const [active, setActive] = useState(["sRGB / Rec.709","DCI-P3","Rec.2020"]);
+  const [active, setActive] = useState(["sRGB / Rec.709"]);
   const canvasRef = useRef();
-  const W=480, H=480;
-  // Plot window with room for AP0 (green at y=1.0, blue at y=-0.077) and margins for labels
-  const X0=-0.05, X1=0.80, Y0=-0.10, Y1=1.05;
-  const ML=32, MB=26, MT=14, MR=14;
-
   const toggle=name=>setActive(p=>p.includes(name)?p.filter(x=>x!==name):[...p,name]);
-
-  // Real CIE 1931 spectral locus (2° observer), 380–700 nm every 5 nm → (x,y)
-  const LOCUS = [
-    [0.1741,0.0050],[0.1740,0.0050],[0.1738,0.0049],[0.1736,0.0049],[0.1733,0.0048],
-    [0.1730,0.0048],[0.1726,0.0048],[0.1721,0.0048],[0.1714,0.0051],[0.1703,0.0058],
-    [0.1689,0.0069],[0.1669,0.0086],[0.1644,0.0109],[0.1611,0.0138],[0.1566,0.0177],
-    [0.1510,0.0227],[0.1440,0.0297],[0.1355,0.0399],[0.1241,0.0578],[0.1096,0.0868],
-    [0.0913,0.1327],[0.0687,0.2007],[0.0454,0.2950],[0.0235,0.4127],[0.0082,0.5384],
-    [0.0039,0.6548],[0.0139,0.7502],[0.0389,0.8120],[0.0743,0.8338],[0.1142,0.8262],
-    [0.1547,0.8059],[0.1929,0.7816],[0.2296,0.7543],[0.2658,0.7243],[0.3016,0.6923],
-    [0.3373,0.6589],[0.3731,0.6245],[0.4087,0.5896],[0.4441,0.5547],[0.4788,0.5202],
-    [0.5125,0.4866],[0.5448,0.4544],[0.5752,0.4242],[0.6029,0.3965],[0.6270,0.3725],
-    [0.6482,0.3514],[0.6658,0.3340],[0.6801,0.3197],[0.6915,0.3083],[0.7006,0.2993],
-    [0.7079,0.2920],[0.7140,0.2859],[0.7190,0.2809],[0.7230,0.2770],[0.7260,0.2740],
-    [0.7283,0.2717],[0.7300,0.2700],[0.7311,0.2689],[0.7320,0.2680],[0.7327,0.2673],
-    [0.7334,0.2666],[0.7340,0.2660],[0.7344,0.2656],[0.7346,0.2654],[0.7347,0.2653],
-  ];
-
-  const mapXY=(x,y)=>([
-    Math.round(ML + ((x-X0)/(X1-X0))*(W-ML-MR)),
-    Math.round(MT + (1-(y-Y0)/(Y1-Y0))*(H-MT-MB)),
-  ]);
-
-  // Chromaticity (x,y) → displayable sRGB (D65). Out-of-gamut clamped + normalised.
-  const xyToRGB=(x,y)=>{
-    if(y<=0) return null;
-    const X=x/y, Y=1, Z=(1-x-y)/y;
-    let r= 3.2406*X -1.5372*Y -0.4986*Z;
-    let g=-0.9689*X +1.8758*Y +0.0415*Z;
-    let b= 0.0557*X -0.2040*Y +1.0570*Z;
-    r=Math.max(0,r); g=Math.max(0,g); b=Math.max(0,b);
-    const m=Math.max(r,g,b); if(m>0){ r/=m; g/=m; b/=m; }
-    const enc=v=> v<=0.0031308 ? 12.92*v : 1.055*Math.pow(v,1/2.4)-0.055;
-    return [Math.round(enc(r)*255),Math.round(enc(g)*255),Math.round(enc(b)*255)];
-  };
 
   useEffect(()=>{
     const c=canvasRef.current; if(!c)return;
+    const ML=34, MB=24, MT=14, MR=14;
+    const W=Math.min(c.parentElement?.clientWidth-24||520,540);
+    // Dynamic ranges: fit the locus + every active gamut (camera greens go far above y=1)
+    let xs=CIE_LOCUS.map(p=>p[0]).concat([0.3127]), ys=CIE_LOCUS.map(p=>p[1]).concat([0.3290]);
+    active.forEach(n=>GAMUTS[n]?.points.forEach(([x,y])=>{xs.push(x);ys.push(y);}));
+    const X0=Math.min(...xs)-0.03, X1=Math.max(...xs)+0.03, Y0=Math.min(...ys)-0.03, Y1=Math.max(...ys)+0.05;
+    const plotW=W-ML-MR, unit=plotW/(X1-X0), H=Math.round(MT+MB+(Y1-Y0)*unit);
     c.width=W; c.height=H;
     const ctx=c.getContext("2d");
+    const mapXY=(x,y)=>([ Math.round(ML+((x-X0)/(X1-X0))*plotW), Math.round(MT+(1-(y-Y0)/(Y1-Y0))*(H-MT-MB)) ]);
     ctx.fillStyle="#07090d"; ctx.fillRect(0,0,W,H);
-    const locusPath=()=>{ ctx.beginPath(); LOCUS.forEach(([x,y],i)=>{ const [px,py]=mapXY(x,y); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }); ctx.closePath(); };
-    // Per-pixel true chromaticity fill, masked to the spectral locus
+    const locusPath=()=>{ ctx.beginPath(); CIE_LOCUS.forEach(([x,y],i)=>{ const [px,py]=mapXY(x,y); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }); ctx.closePath(); };
+    // true-colour chromaticity fill masked to the locus
     const off=document.createElement("canvas"); off.width=W; off.height=H;
     const img=off.getContext("2d").createImageData(W,H); const dd=img.data;
-    for(let py=0;py<H;py++){
-      for(let px=0;px<W;px++){
-        const x=X0+((px-ML)/(W-ML-MR))*(X1-X0);
-        const y=Y0+(1-(py-MT)/(H-MT-MB))*(Y1-Y0);
-        const rgb=xyToRGB(x,y);
-        if(rgb){ const i=(py*W+px)*4; dd[i]=rgb[0]; dd[i+1]=rgb[1]; dd[i+2]=rgb[2]; dd[i+3]=255; }
-      }
+    for(let py=0;py<H;py++) for(let px=0;px<W;px++){
+      const x=X0+((px-ML)/plotW)*(X1-X0), y=Y0+(1-(py-MT)/(H-MT-MB))*(Y1-Y0);
+      const rgb=cieXYtoRGB(x,y);
+      if(rgb){ const i=(py*W+px)*4; dd[i]=rgb[0]; dd[i+1]=rgb[1]; dd[i+2]=rgb[2]; dd[i+3]=255; }
     }
     off.getContext("2d").putImageData(img,0,0);
     ctx.save(); locusPath(); ctx.clip(); ctx.drawImage(off,0,0); ctx.restore();
-    // Locus outline + line of purples
     locusPath(); ctx.strokeStyle="rgba(255,255,255,0.45)"; ctx.lineWidth=1.2; ctx.stroke();
-    // White point D65
     const [wpx,wpy]=mapXY(0.3127,0.3290);
-    ctx.fillStyle="#000"; ctx.beginPath();ctx.arc(wpx,wpy,4,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#fff"; ctx.beginPath();ctx.arc(wpx,wpy,2.5,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#e5e7eb"; ctx.font="10px monospace";ctx.fillText("D65",wpx+6,wpy+4);
-    // Gamut triangles (outline over the true-colour field)
+    ctx.fillStyle="#000"; ctx.beginPath();ctx.arc(wpx,wpy,4,0,7);ctx.fill();
+    ctx.fillStyle="#fff"; ctx.beginPath();ctx.arc(wpx,wpy,2.5,0,7);ctx.fill();
+    ctx.fillStyle="#e5e7eb"; ctx.font="10px monospace"; ctx.fillText("D65",wpx+6,wpy+4);
     Object.entries(GAMUTS).forEach(([name,{color,points}])=>{
       if(!active.includes(name)) return;
-      ctx.strokeStyle=color; ctx.lineWidth=2; ctx.fillStyle=color+"14";
-      ctx.beginPath();
-      points.forEach(([x,y],i)=>{ const [px,py]=mapXY(x,y); i?ctx.lineTo(px,py):ctx.moveTo(px,py); });
-      ctx.closePath(); ctx.fill(); ctx.stroke();
-      // primary corner dots
-      points.forEach(([x,y])=>{ const [px,py]=mapXY(x,y); ctx.fillStyle=color; ctx.beginPath();ctx.arc(px,py,2.5,0,Math.PI*2);ctx.fill(); });
-      const cx=points.reduce((s,[x])=>s+x,0)/3, cy=points.reduce((s,[,y])=>s+y,0)/3;
-      const [lx,ly]=mapXY(cx,cy);
-      ctx.fillStyle=color; ctx.font="bold 10px monospace";
-      ctx.fillText(name.split(" ")[0],lx-14,ly);
+      ctx.strokeStyle=color; ctx.lineWidth=2; ctx.fillStyle=color+"12";
+      ctx.beginPath(); points.forEach(([x,y],i)=>{ const [px,py]=mapXY(x,y); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }); ctx.closePath(); ctx.fill(); ctx.stroke();
+      points.forEach(([x,y])=>{ const [px,py]=mapXY(x,y); ctx.fillStyle=color; ctx.beginPath();ctx.arc(px,py,2.5,0,7);ctx.fill(); });
+      const cx=points.reduce((s,[x])=>s+x,0)/3, cy=points.reduce((s,[,y])=>s+y,0)/3; const [lx,ly]=mapXY(cx,cy);
+      ctx.fillStyle=color; ctx.font="bold 10px monospace"; ctx.fillText(name.split(" ")[0],lx-14,ly);
     });
-    // axes
     ctx.fillStyle="#6b7280"; ctx.font="10px monospace";
     ctx.fillText("x",W-12,H-4); ctx.fillText("y",4,12);
     ctx.fillStyle="#4b5563";
-    for(let v=0;v<=0.8001;v+=0.2){ const [px]=mapXY(v,0); ctx.fillText(v.toFixed(1),px-8,H-4); }
-    for(let v=0;v<=1.0001;v+=0.2){ const [,py]=mapXY(0,v); ctx.fillText(v.toFixed(1),4,py+4); }
+    for(let v=Math.ceil(Math.max(0,X0)/0.2)*0.2; v<=X1; v+=0.2){ const [px]=mapXY(v,0); ctx.fillText(v.toFixed(1),px-8,H-4); }
+    for(let v=Math.ceil(Math.max(0,Y0)/0.2)*0.2; v<=Y1; v+=0.2){ const [,py]=mapXY(0,v); ctx.fillText(v.toFixed(1),4,py+4); }
   },[active]);
 
   return (
     <div>
       <InfoBox>
-        The <strong>CIE 1931 chromaticity diagram</strong> maps all visible colours as (x,y) coordinates. Colour spaces are defined as triangular <strong>gamuts</strong> within this diagram — the larger the triangle, the more colours it can represent. <strong>sRGB/Rec.709</strong> covers standard screens. <strong>DCI-P3</strong> covers cinema projection. <strong>Rec.2020</strong> is the HDR broadcast target. <strong>ACES AP0</strong> encompasses the entire visible spectrum — the scene-referred exchange space in the ACES pipeline (SMPTE ST 2065-1). All rendering in post-production is a mapping from a wider gamut into the delivery target.
+        The <strong>CIE 1931 chromaticity diagram</strong> maps every visible colour as an (x,y) coordinate; colour spaces are triangular <strong>gamuts</strong> whose corners are the red/green/blue primaries. Delivery spaces (<strong>Rec.709</strong>, <strong>DCI-P3</strong>, <strong>Rec.2020</strong>) sit inside the horseshoe. <strong>Camera and working gamuts</strong> (DaVinci WG, ARRI, Sony, Canon, RED, ACES) are much larger — some use <em>imaginary primaries</em> outside the visible spectrum (Canon/RED greens climb past y=1), which is why their triangles extend beyond the horseshoe. The diagram auto-scales to fit whatever you enable. Grading is always a mapping from a wider capture gamut into the delivery target.
       </InfoBox>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
         {Object.entries(GAMUTS).map(([name,{color}])=>(
@@ -757,8 +746,8 @@ function ModuleColorSpaces() {
           </button>
         ))}
       </div>
-      <div style={{background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12,display:"inline-block"}}>
-        <canvas ref={canvasRef} style={{display:"block"}}/>
+      <div style={{background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12,display:"block",maxWidth:"100%"}}>
+        <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
       {active.length>0 && (
         <div style={{marginTop:12}}>
