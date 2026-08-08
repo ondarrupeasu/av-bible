@@ -40,6 +40,9 @@ const STRINGS = {
       cameraMovement: { title: "Camera Movement", desc: "Pan, tilt, track, zoom — motion vocabulary" },
       timecode: { title: "Timecode", desc: "SMPTE timecode — the language of synchronisation" },
       scopes: { title: "Scopes", desc: "Histogram, Waveform, Vectorscope & Parade — with live grading" },
+      exposureTriangle: { title: "Exposure Triangle", desc: "Shutter, aperture, ISO — and the trade-offs" },
+      falseColor: { title: "False Color", desc: "Exposure mapped to an IRE colour palette" },
+      lut: { title: "LUTs", desc: "1D & 3D lookup tables — technical vs creative looks" },
     },
   },
 };
@@ -52,11 +55,11 @@ const T = STRINGS.en;
 const CATEGORIES = [
   {
     id: "image", label: T.categories.image,
-    modules: ["aspectRatio","resolution","chromaSubsampling","raw","frameRate"],
+    modules: ["aspectRatio","resolution","chromaSubsampling","raw","frameRate","exposureTriangle"],
   },
   {
     id: "color", label: T.categories.color,
-    modules: ["colorTemp","pictureProfiles","colorSpaces","aces"],
+    modules: ["colorTemp","pictureProfiles","colorSpaces","lut","aces"],
   },
   {
     id: "defects", label: T.categories.defects,
@@ -72,7 +75,7 @@ const CATEGORIES = [
   },
   {
     id: "scopes", label: T.categories.scopes,
-    modules: ["scopes"],
+    modules: ["scopes","falseColor"],
   },
 ];
 
@@ -2333,10 +2336,220 @@ const styles = {
 };
 
 // ─────────────────────────────────────────────
+// MODULE: Exposure Triangle
+// ─────────────────────────────────────────────
+const SHUTTERS=[1,2,4,8,15,30,50,60,125,250,500,1000,2000];   // 1/x s
+const APERTURES=[1.4,2,2.8,4,5.6,8,11,16,22];
+const ISOS=[100,200,400,800,1600,3200,6400,12800];
+function ExpRow({name,arr,val,set,fmt,effect}){
+  return (
+    <div style={{marginBottom:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+        <span style={styles.label}>{name}: <strong style={{color:"#f59e0b"}}>{fmt(arr[val])}</strong></span>
+        <span style={{color:"#6b7280",fontSize:11}}>{effect}</span>
+      </div>
+      <input type="range" min={0} max={arr.length-1} step={1} value={val} onChange={e=>set(+e.target.value)} style={{...styles.slider,width:"100%"}}/>
+    </div>
+  );
+}
+function ModuleExposureTriangle({ image }) {
+  const [sh,setSh]=useState(6);   // index → 1/50
+  const [ap,setAp]=useState(3);   // index → f/4
+  const [iso,setIso]=useState(3); // index → 800
+  const ref=useRef();
+  const stops = Math.log2(50/SHUTTERS[sh]) + Math.log2(16/(APERTURES[ap]**2)) + Math.log2(ISOS[iso]/800);
+  useEffect(()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const c=ref.current; if(!c)return;
+      const W=Math.min(c.parentElement?.clientWidth-32||760,760), H=Math.round(W*9/16);
+      c.width=W; c.height=H; const ctx=c.getContext("2d");
+      ctx.drawImage(img,0,0,W,H);
+      const gain=Math.pow(2,stops);
+      let id=ctx.getImageData(0,0,W,H), d=id.data;
+      // brightness (exposure)
+      for(let i=0;i<d.length;i+=4){ d[i]=Math.min(255,d[i]*gain); d[i+1]=Math.min(255,d[i+1]*gain); d[i+2]=Math.min(255,d[i+2]*gain); }
+      // ISO noise (grows with sensitivity)
+      const nAmp=Math.max(0,(iso-2))*3.2;
+      if(nAmp>0.5) for(let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*nAmp, cn=(Math.random()-0.5)*nAmp*0.7;
+        d[i]=Math.max(0,Math.min(255,d[i]+n+cn)); d[i+1]=Math.max(0,Math.min(255,d[i+1]+n)); d[i+2]=Math.max(0,Math.min(255,d[i+2]+n-cn)); }
+      ctx.putImageData(id,0,0);
+      // motion blur from long shutter (horizontal smear)
+      const blurPx=Math.round(Math.max(0,(6-sh))*3.4);   // slower shutter → more smear
+      if(blurPx>0){
+        const t=document.createElement("canvas"); t.width=W;t.height=H; const tc=t.getContext("2d");
+        tc.globalAlpha=1/(blurPx*2+1);
+        for(let k=-blurPx;k<=blurPx;k++) tc.drawImage(c,k,0);
+        ctx.clearRect(0,0,W,H); ctx.globalAlpha=1; ctx.drawImage(t,0,0);
+      }
+      // DoF hint (wide aperture → soft background top band, cheap suggestion)
+      ctx.fillStyle="rgba(0,0,0,0.6)"; ctx.fillRect(0,0,W,22);
+      ctx.font="11px monospace"; ctx.fillStyle= Math.abs(stops)<0.25?"#34d399":stops>0?"#f59e0b":"#60a5fa";
+      ctx.fillText(`1/${SHUTTERS[sh]}s   f/${APERTURES[ap]}   ISO ${ISOS[iso]}    ·    ${stops>0?"+":""}${stops.toFixed(1)} EV  ${Math.abs(stops)<0.25?"(balanced)":stops>0?"(over)":"(under)"}`,8,14);
+    };
+    img.src=image;
+  },[sh,ap,iso,image,stops]);
+  return (
+    <div>
+      <InfoBox>
+        The <strong>exposure triangle</strong> is the three controls that set image brightness — and each carries a <em>side-effect</em>. <strong>Shutter</strong> (exposure time) also sets <em>motion blur</em>: a 180° shutter (1/50 at 25 fps) is the cinema norm; faster freezes motion, slower smears it. <strong>Aperture</strong> (f-stop) also sets <em>depth of field</em>: wide (f/1.4) throws the background out of focus, narrow (f/16) keeps it sharp. <strong>ISO</strong> (sensitivity) also sets <em>noise</em>: low is clean, high is grainy. Each full stop <em>doubles or halves</em> the light — so you can trade one for another and keep the same exposure (<strong>reciprocity</strong>). Watch the EV badge: keep it near <span style={{color:"#34d399"}}>balanced</span> while changing which side-effect you accept.
+      </InfoBox>
+      <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{flex:"1 1 300px",minWidth:280}}>
+          <ExpRow name="Shutter" arr={SHUTTERS} val={sh} set={setSh} fmt={v=>"1/"+v+"s"} effect="↔ motion blur"/>
+          <ExpRow name="Aperture" arr={APERTURES} val={ap} set={setAp} fmt={v=>"f/"+v} effect="↔ depth of field"/>
+          <ExpRow name="ISO" arr={ISOS} val={iso} set={setIso} fmt={v=>v} effect="↔ noise"/>
+          <div style={{marginTop:8,padding:"8px 12px",background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,fontSize:12,color:"#9ca3af",lineHeight:1.6}}>
+            Try: open the aperture <em>and</em> speed up the shutter by the same number of stops — the brightness stays the same, but you swap deep focus for shallow, and motion blur for a frozen frame.
+          </div>
+        </div>
+        <div style={{flex:"1 1 340px",minWidth:300,background:"#111",borderRadius:8,padding:12}}>
+          <canvas ref={ref} style={{display:"block",width:"100%",borderRadius:4}}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MODULE: False Color
+// ─────────────────────────────────────────────
+const FC_BANDS=[
+  {max:2.5,col:[40,40,40],name:"crushed black"},
+  {max:8,col:[80,40,160],name:"near black (purple)"},
+  {max:20,col:[40,80,210],name:"shadows (blue)"},
+  {max:40,col:[70,70,70],name:"low grey"},
+  {max:47,col:[40,170,90],name:"18% mid grey (green)"},
+  {max:53,col:[130,130,130],name:"mid grey"},
+  {max:60,col:[220,130,180],name:"skin key (pink)"},
+  {max:74,col:[200,200,200],name:"high grey"},
+  {max:88,col:[220,180,40],name:"highlights (yellow)"},
+  {max:97,col:[235,120,30],name:"near clip (orange)"},
+  {max:101,col:[230,40,40],name:"clipped white (red)"},
+];
+function ModuleFalseColor({ image }) {
+  const [on,setOn]=useState(true);
+  const ref=useRef();
+  useEffect(()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const c=ref.current; if(!c)return;
+      const W=Math.min(c.parentElement?.clientWidth-32||760,760), H=Math.round(W*9/16);
+      c.width=W; c.height=H; const ctx=c.getContext("2d");
+      ctx.drawImage(img,0,0,W,H);
+      if(on){
+        const id=ctx.getImageData(0,0,W,H), d=id.data;
+        for(let i=0;i<d.length;i+=4){
+          const ire=luma709(d[i],d[i+1],d[i+2])/255*100;
+          let b=FC_BANDS[FC_BANDS.length-1];
+          for(const x of FC_BANDS){ if(ire<=x.max){ b=x; break; } }
+          d[i]=b.col[0]; d[i+1]=b.col[1]; d[i+2]=b.col[2];
+        }
+        ctx.putImageData(id,0,0);
+      }
+      ctx.fillStyle="rgba(0,0,0,0.6)"; ctx.fillRect(0,0,W,22);
+      ctx.font="11px monospace"; ctx.fillStyle="#9ca3af";
+      ctx.fillText(on?"FALSE COLOUR  ·  luma → IRE palette":"SOURCE",8,14);
+    };
+    img.src=image;
+  },[on,image]);
+  return (
+    <div>
+      <InfoBox>
+        <strong>False colour</strong> paints every pixel by its <strong>luminance (IRE)</strong> instead of its real colour, so you can judge <em>exposure</em> at a glance — no guessing on an uncalibrated monitor. It is the on-set companion to the waveform. The palette is a convention (ARRI, Blackmagic and RED share the idea): <span style={{color:"#e02828"}}>red</span> = clipped highlights, <span style={{color:"#eb781e"}}>orange</span> just below clip, <span style={{color:"#dcb428"}}>yellow</span> bright, <span style={{color:"#28aa5a"}}>green</span> ≈ 18% middle grey, <span style={{color:"#2850d2"}}>blue</span> shadows, <span style={{color:"#5028a0"}}>purple</span> near black. The trick on set: expose a face so the skin sits around the pink/grey band, and make sure nothing you care about is red. Like a display LUT, it is a <em>monitoring overlay</em> — it never touches the recorded file.
+      </InfoBox>
+      <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
+        {[["False colour",true],["Source",false]].map(([lbl,v])=>(
+          <button key={lbl} onClick={()=>setOn(v)} style={on===v?styles.btnActive:styles.btnChip}>{lbl}</button>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{flex:"1 1 340px",minWidth:300,background:"#111",borderRadius:8,padding:12}}>
+          <canvas ref={ref} style={{display:"block",width:"100%",borderRadius:4}}/>
+        </div>
+        <div style={{flex:"1 1 200px",minWidth:190,background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:8,letterSpacing:"0.08em"}}>IRE LEGEND</div>
+          {[...FC_BANDS].reverse().map((b,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+              <span style={{width:18,height:12,borderRadius:2,background:`rgb(${b.col[0]},${b.col[1]},${b.col[2]})`,flexShrink:0}}/>
+              <span style={{color:"#9ca3af",fontSize:11,fontFamily:"monospace"}}>≤{b.max} IRE</span>
+              <span style={{color:"#6b7280",fontSize:11}}>{b.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MODULE: LUTs
+// ─────────────────────────────────────────────
+const LUTS=[
+  {id:"none",name:"None (source)",kind:"—",note:"The image as captured.",f:(r,g,b)=>[r,g,b]},
+  {id:"rec709",name:"Log → Rec.709",kind:"technical",note:"A technical LUT expands flat Log footage into display contrast. Normalising, non-creative — the intended baseline before grading.",f:(r,g,b)=>{const s=v=>{v/=255; v=Math.min(1,Math.max(0,(v-0.09)/0.72)); v=v<=0?0:Math.pow(v,1/1.15); return 255*(v*v*(3-2*v));}; return [s(r),s(g),s(b)];}},
+  {id:"teal",name:"Teal & Orange",kind:"creative",note:"The blockbuster look: push shadows toward teal, skin/highlights toward orange for complementary contrast.",f:(r,g,b)=>{const l=luma709(r,g,b)/255; const w=l; return [r+ (1-w)*-14 + w*26, g + (1-w)*10 + w*4, b + (1-w)*30 + w*-24];}},
+  {id:"bleach",name:"Bleach Bypass",kind:"creative",note:"Silver-retention look: desaturated, high contrast, harsh. War films, gritty drama.",f:(r,g,b)=>{const l=luma709(r,g,b); const mix=v=>{let o=v*0.35+l*0.65; o=(o-128)*1.35+128; return o;}; return [mix(r),mix(g),mix(b)];}},
+  {id:"night",name:"Day for Night",kind:"creative",note:"Fake night from a day exposure: crush and cool the image, hold a little moonlit highlight.",f:(r,g,b)=>{const mix=v=>v*0.45; return [mix(r)*0.8,mix(g)*0.95,mix(b)*1.5+12];}},
+  {id:"warm",name:"Warm Film",kind:"creative",note:"Gentle film emulation: warm mids, soft lifted blacks, mild saturation.",f:(r,g,b)=>{const lift=v=>v*0.92+12; return [lift(r)*1.06,lift(g)*1.0,lift(b)*0.9];}},
+];
+function ModuleLUT({ image }) {
+  const [lut,setLut]=useState("rec709");
+  const [split,setSplit]=useState(true);
+  const ref=useRef();
+  const active=LUTS.find(l=>l.id===lut)||LUTS[0];
+  useEffect(()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const c=ref.current; if(!c)return;
+      const W=Math.min(c.parentElement?.clientWidth-32||760,760), H=Math.round(W*9/16);
+      c.width=W; c.height=H; const ctx=c.getContext("2d");
+      ctx.drawImage(img,0,0,W,H);
+      const id=ctx.getImageData(0,0,W,H), d=id.data;
+      const x0= split? Math.floor(W*0.5):0;
+      for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+        if(split && x<x0) continue;
+        const i=(y*W+x)*4; const o=active.f(d[i],d[i+1],d[i+2]);
+        d[i]=Math.max(0,Math.min(255,o[0])); d[i+1]=Math.max(0,Math.min(255,o[1])); d[i+2]=Math.max(0,Math.min(255,o[2]));
+      }
+      ctx.putImageData(id,0,0);
+      if(split){ ctx.strokeStyle="rgba(255,255,255,0.7)"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x0,0); ctx.lineTo(x0,H); ctx.stroke();
+        ctx.fillStyle="rgba(0,0,0,0.55)"; ctx.fillRect(0,H-20,88,20); ctx.fillRect(x0,H-20,90,20);
+        ctx.font="11px monospace"; ctx.fillStyle="#9ca3af"; ctx.fillText("source",8,H-6); ctx.fillText("LUT",x0+8,H-6); }
+      ctx.fillStyle="rgba(0,0,0,0.6)"; ctx.fillRect(0,0,W,22);
+      ctx.font="11px monospace"; ctx.fillStyle="#f59e0b"; ctx.fillText(`${active.name}   [${active.kind}]`,8,14);
+    };
+    img.src=image;
+  },[lut,split,image,active]);
+  return (
+    <div>
+      <InfoBox>
+        A <strong>LUT (Look-Up Table)</strong> is a precomputed map from input colour to output colour — no maths at play-time, just a table lookup, so it is fast and consistent everywhere. A <strong>1D LUT</strong> remaps each channel's curve independently (contrast, gamma). A <strong>3D LUT</strong> (a cube of nodes, e.g. 33×33×33, the <code>.cube</code> file) can remap <em>any</em> colour to any other — it can shift hue and saturation, which a 1D LUT cannot. Two very different jobs: a <strong>technical LUT</strong> (Log→Rec.709) just normalises footage to the display standard — the honest starting point; a <strong>creative LUT</strong> is a <em>look</em>. Applied as a <em>display/preview LUT</em> it is non-destructive monitoring; <em>baked in</em> it is permanent. A LUT is not a grade — it can't isolate a region or track a mask; it is a fixed global map.
+      </InfoBox>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+        {LUTS.map(l=>(
+          <button key={l.id} onClick={()=>setLut(l.id)} style={lut===l.id?styles.btnActive:styles.btnChip}>{l.name}</button>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:12}}>
+        <button onClick={()=>setSplit(s=>!s)} style={split?styles.btnActive:styles.btnChip}>{split?"Split view: ON":"Split view: OFF"}</button>
+        <span style={{color:"#6b7280",fontSize:12}}>{active.kind!=="—" && <><strong style={{color:active.kind==="technical"?"#60a5fa":"#f59e0b"}}>{active.kind}</strong> · {active.note}</>}</span>
+      </div>
+      <div style={{background:"#111",borderRadius:8,padding:12}}>
+        <canvas ref={ref} style={{display:"block",width:"100%",borderRadius:4}}/>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // Module registry map
 // ─────────────────────────────────────────────
 const MODULE_COMPONENTS = {
   aspectRatio: ModuleAspectRatio,
+  exposureTriangle: ModuleExposureTriangle,
+  falseColor: ModuleFalseColor,
+  lut: ModuleLUT,
   resolution: ModuleResolution,
   chromaSubsampling: ModuleChromaSubsampling,
   raw: ModuleRAW,
