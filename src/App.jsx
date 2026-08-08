@@ -609,17 +609,21 @@ function ModuleColorSpaces() {
 
   const toggle=name=>setActive(p=>p.includes(name)?p.filter(x=>x!==name):[...p,name]);
 
-  // CIE 1931 horseshoe approximation points
-  const HORSESHOE = [
-    [0.1741,0.0050],[0.1740,0.0050],[0.1738,0.0049],[0.1736,0.0044],[0.1730,0.0036],
-    [0.1714,0.0022],[0.1689,0.0008],[0.1664,0.0000],[0.1612,0.0000],[0.1490,0.0041],
-    [0.1241,0.0217],[0.1096,0.0395],[0.0949,0.0600],[0.0784,0.0600],[0.0421,0.0521],
-    [0.0318,0.0754],[0.0270,0.0965],[0.0295,0.1264],[0.0452,0.1718],[0.0642,0.2245],
-    [0.0784,0.2764],[0.0913,0.3322],[0.1069,0.3957],[0.1282,0.4700],[0.1497,0.5441],
-    [0.1761,0.6229],[0.2123,0.7100],[0.2558,0.7745],[0.3101,0.8160],[0.3728,0.8379],
-    [0.4245,0.8270],[0.4860,0.7857],[0.5298,0.7318],[0.5623,0.6654],[0.5974,0.5765],
-    [0.6280,0.4926],[0.6490,0.4117],[0.6680,0.3300],[0.6788,0.2702],[0.6900,0.2100],
-    [0.7010,0.1480],[0.7190,0.0806],[0.7346,0.0265],[0.7347,0.0265],
+  // Real CIE 1931 spectral locus (2° observer), 380–700 nm every 5 nm → (x,y)
+  const LOCUS = [
+    [0.1741,0.0050],[0.1740,0.0050],[0.1738,0.0049],[0.1736,0.0049],[0.1733,0.0048],
+    [0.1730,0.0048],[0.1726,0.0048],[0.1721,0.0048],[0.1714,0.0051],[0.1703,0.0058],
+    [0.1689,0.0069],[0.1669,0.0086],[0.1644,0.0109],[0.1611,0.0138],[0.1566,0.0177],
+    [0.1510,0.0227],[0.1440,0.0297],[0.1355,0.0399],[0.1241,0.0578],[0.1096,0.0868],
+    [0.0913,0.1327],[0.0687,0.2007],[0.0454,0.2950],[0.0235,0.4127],[0.0082,0.5384],
+    [0.0039,0.6548],[0.0139,0.7502],[0.0389,0.8120],[0.0743,0.8338],[0.1142,0.8262],
+    [0.1547,0.8059],[0.1929,0.7816],[0.2296,0.7543],[0.2658,0.7243],[0.3016,0.6923],
+    [0.3373,0.6589],[0.3731,0.6245],[0.4087,0.5896],[0.4441,0.5547],[0.4788,0.5202],
+    [0.5125,0.4866],[0.5448,0.4544],[0.5752,0.4242],[0.6029,0.3965],[0.6270,0.3725],
+    [0.6482,0.3514],[0.6658,0.3340],[0.6801,0.3197],[0.6915,0.3083],[0.7006,0.2993],
+    [0.7079,0.2920],[0.7140,0.2859],[0.7190,0.2809],[0.7230,0.2770],[0.7260,0.2740],
+    [0.7283,0.2717],[0.7300,0.2700],[0.7311,0.2689],[0.7320,0.2680],[0.7327,0.2673],
+    [0.7334,0.2666],[0.7340,0.2660],[0.7344,0.2656],[0.7346,0.2654],[0.7347,0.2653],
   ];
 
   const mapXY=(x,y)=>([
@@ -627,58 +631,63 @@ function ModuleColorSpaces() {
     Math.round(MT + (1-(y-Y0)/(Y1-Y0))*(H-MT-MB)),
   ]);
 
+  // Chromaticity (x,y) → displayable sRGB (D65). Out-of-gamut clamped + normalised.
+  const xyToRGB=(x,y)=>{
+    if(y<=0) return null;
+    const X=x/y, Y=1, Z=(1-x-y)/y;
+    let r= 3.2406*X -1.5372*Y -0.4986*Z;
+    let g=-0.9689*X +1.8758*Y +0.0415*Z;
+    let b= 0.0557*X -0.2040*Y +1.0570*Z;
+    r=Math.max(0,r); g=Math.max(0,g); b=Math.max(0,b);
+    const m=Math.max(r,g,b); if(m>0){ r/=m; g/=m; b/=m; }
+    const enc=v=> v<=0.0031308 ? 12.92*v : 1.055*Math.pow(v,1/2.4)-0.055;
+    return [Math.round(enc(r)*255),Math.round(enc(g)*255),Math.round(enc(b)*255)];
+  };
+
   useEffect(()=>{
     const c=canvasRef.current; if(!c)return;
     c.width=W; c.height=H;
     const ctx=c.getContext("2d");
-    ctx.clearRect(0,0,W,H);
-    // Draw CIE horseshoe
-    ctx.beginPath();
-    HORSESHOE.forEach(([x,y],i)=>{
-      const [px,py]=mapXY(x,y);
-      i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
-    });
-    // close with straight line (line of purples)
-    const [x0,y0]=mapXY(0.1741,0.0050);
-    const [xl,yl]=mapXY(0.7347,0.0265);
-    ctx.lineTo(xl,yl); ctx.closePath();
-    ctx.strokeStyle="#374151"; ctx.lineWidth=1.5; ctx.stroke();
-    // Spectral color fill approximation
-    const [gx0,gy0]=mapXY(0.16,0.02); const [gx1,gy1]=mapXY(0.62,0.60);
-    const grad=ctx.createLinearGradient(gx0,gy0,gx1,gy1);
-    grad.addColorStop(0,"rgba(100,0,200,0.12)");
-    grad.addColorStop(0.15,"rgba(0,0,255,0.12)");
-    grad.addColorStop(0.3,"rgba(0,200,200,0.12)");
-    grad.addColorStop(0.5,"rgba(0,200,0,0.12)");
-    grad.addColorStop(0.7,"rgba(200,200,0,0.12)");
-    grad.addColorStop(1,"rgba(255,0,0,0.12)");
-    ctx.fillStyle=grad; ctx.fill();
+    ctx.fillStyle="#07090d"; ctx.fillRect(0,0,W,H);
+    const locusPath=()=>{ ctx.beginPath(); LOCUS.forEach(([x,y],i)=>{ const [px,py]=mapXY(x,y); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }); ctx.closePath(); };
+    // Per-pixel true chromaticity fill, masked to the spectral locus
+    const off=document.createElement("canvas"); off.width=W; off.height=H;
+    const img=off.getContext("2d").createImageData(W,H); const dd=img.data;
+    for(let py=0;py<H;py++){
+      for(let px=0;px<W;px++){
+        const x=X0+((px-ML)/(W-ML-MR))*(X1-X0);
+        const y=Y0+(1-(py-MT)/(H-MT-MB))*(Y1-Y0);
+        const rgb=xyToRGB(x,y);
+        if(rgb){ const i=(py*W+px)*4; dd[i]=rgb[0]; dd[i+1]=rgb[1]; dd[i+2]=rgb[2]; dd[i+3]=255; }
+      }
+    }
+    off.getContext("2d").putImageData(img,0,0);
+    ctx.save(); locusPath(); ctx.clip(); ctx.drawImage(off,0,0); ctx.restore();
+    // Locus outline + line of purples
+    locusPath(); ctx.strokeStyle="rgba(255,255,255,0.45)"; ctx.lineWidth=1.2; ctx.stroke();
     // White point D65
     const [wpx,wpy]=mapXY(0.3127,0.3290);
-    ctx.fillStyle="#fff"; ctx.beginPath();ctx.arc(wpx,wpy,4,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#9ca3af"; ctx.font="10px monospace";ctx.fillText("D65",wpx+6,wpy+4);
-    // Gamut triangles
+    ctx.fillStyle="#000"; ctx.beginPath();ctx.arc(wpx,wpy,4,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#fff"; ctx.beginPath();ctx.arc(wpx,wpy,2.5,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle="#e5e7eb"; ctx.font="10px monospace";ctx.fillText("D65",wpx+6,wpy+4);
+    // Gamut triangles (outline over the true-colour field)
     Object.entries(GAMUTS).forEach(([name,{color,points}])=>{
       if(!active.includes(name)) return;
-      ctx.strokeStyle=color; ctx.lineWidth=2;
-      ctx.fillStyle=color+"33";
+      ctx.strokeStyle=color; ctx.lineWidth=2; ctx.fillStyle=color+"14";
       ctx.beginPath();
-      points.forEach(([x,y],i)=>{
-        const [px,py]=mapXY(x,y);
-        i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
-      });
+      points.forEach(([x,y],i)=>{ const [px,py]=mapXY(x,y); i?ctx.lineTo(px,py):ctx.moveTo(px,py); });
       ctx.closePath(); ctx.fill(); ctx.stroke();
-      // label at centroid
-      const cx=points.reduce((s,[x])=>s+x,0)/3;
-      const cy=points.reduce((s,[,y])=>s+y,0)/3;
+      // primary corner dots
+      points.forEach(([x,y])=>{ const [px,py]=mapXY(x,y); ctx.fillStyle=color; ctx.beginPath();ctx.arc(px,py,2.5,0,Math.PI*2);ctx.fill(); });
+      const cx=points.reduce((s,[x])=>s+x,0)/3, cy=points.reduce((s,[,y])=>s+y,0)/3;
       const [lx,ly]=mapXY(cx,cy);
-      ctx.fillStyle=color; ctx.font="bold 9px monospace";
-      ctx.fillText(name.split(" ")[0],lx-15,ly);
+      ctx.fillStyle=color; ctx.font="bold 10px monospace";
+      ctx.fillText(name.split(" ")[0],lx-14,ly);
     });
     // axes
-    ctx.fillStyle="#4b5563"; ctx.font="10px monospace";
+    ctx.fillStyle="#6b7280"; ctx.font="10px monospace";
     ctx.fillText("x",W-12,H-4); ctx.fillText("y",4,12);
-    ctx.fillStyle="#374151";
+    ctx.fillStyle="#4b5563";
     for(let v=0;v<=0.8001;v+=0.2){ const [px]=mapXY(v,0); ctx.fillText(v.toFixed(1),px-8,H-4); }
     for(let v=0;v<=1.0001;v+=0.2){ const [,py]=mapXY(0,v); ctx.fillText(v.toFixed(1),4,py+4); }
   },[active]);
