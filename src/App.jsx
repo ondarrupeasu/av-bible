@@ -19,6 +19,7 @@ const STRINGS = {
       narrative: "Narrative & Camera",
       scopes: "Monitoring & Scopes",
       signals: "Signals & Connectivity",
+      lighting: "Lighting",
     },
     modules: {
       aspectRatio: { title: "Aspect Ratio", desc: "Explore how different ratios frame the world" },
@@ -47,6 +48,8 @@ const STRINGS = {
       codecs: { title: "Compression & Codecs", desc: "Intra vs inter, DCT blocking, I/P/B frames, the codec table" },
       containers: { title: "Containers & Wrappers", desc: "MOV, MP4, MXF, MKV — codec ≠ container" },
       signals: { title: "Signals & Connectivity", desc: "HDMI, SDI, fibre, NDI, SRT, XLR, DMX — cables vs IP transports" },
+      portraitLight: { title: "Portrait Lighting", desc: "Key position & patterns — Rembrandt, butterfly, loop, split" },
+      dmx: { title: "DMX Lighting Control", desc: "Universe, addressing, fixture personalities, Art-Net/sACN" },
       lensDistortion: { title: "Lens Distortion", desc: "Barrel & pincushion — when straight lines bend" },
       interlacing: { title: "Interlacing & Combing", desc: "Fields, comb teeth on motion, deinterlacing" },
       halation: { title: "Halation & Bloom", desc: "Highlight glow — the red halo of film" },
@@ -89,6 +92,10 @@ const CATEGORIES = [
   {
     id: "signals", label: T.categories.signals,
     modules: ["signals"],
+  },
+  {
+    id: "lighting", label: T.categories.lighting,
+    modules: ["portraitLight","dmx"],
   },
 ];
 
@@ -3086,6 +3093,224 @@ function ModuleFocusBreathing({ image }) {
 }
 
 // ─────────────────────────────────────────────
+// MODULE: Portrait Lighting (2.5D shaded bust)
+// ─────────────────────────────────────────────
+const LIGHT_PATTERNS=[
+  {id:"butterfly",name:"Butterfly / Paramount",az:0,el:52,note:"Key straight in front and high — a small symmetrical shadow under the nose (the 'butterfly'). Glamour and beauty lighting."},
+  {id:"loop",name:"Loop",az:33,el:40,note:"Key slightly off-axis and above — the nose casts a short shadow 'loop' down and to the side. The everyday, flattering key position."},
+  {id:"rembrandt",name:"Rembrandt",az:52,el:48,note:"Further round — the nose shadow meets the cheek shadow, leaving a lit triangle under the far eye. Dramatic and classic."},
+  {id:"split",name:"Split",az:90,el:6,note:"Key straight to one side — half the face lit, half in shadow. Tense, mysterious, high-contrast."},
+  {id:"rim",name:"Rim / Back",az:150,el:26,note:"Key behind the subject — only the edge of the face and hair glow, separating them from the background. A separation light, not a key."},
+];
+function shadeBust(canvas, {az,el,intensity,softness,kelvin,fill}){
+  const S=Math.min(canvas.parentElement?.clientWidth-24||360,360); canvas.width=S; canvas.height=S;
+  const ctx=canvas.getContext("2d"); const img=ctx.createImageData(S,S), d=img.data;
+  const azr=az*Math.PI/180, elr=el*Math.PI/180;
+  const L=[Math.sin(azr)*Math.cos(elr), -Math.sin(elr), Math.cos(azr)*Math.cos(elr)]; // to-light
+  const kt=kelvinToRGB(kelvin), lc=[kt[0]/255,kt[1]/255,kt[2]/255];
+  const hcx=S*0.5, hcy=S*0.46, R=S*0.32;
+  const specSharp= softness<0.5? 40:14; const term=0.04+softness*0.5; // terminator softness
+  const skin=[232,188,150];
+  // face relief height field (nose ridge, brow, eye sockets, mouth)
+  const dfn=(X,Y)=>{ let h=0;
+    h += 0.34*Math.exp(-X*X*40)*Math.exp(-Math.pow((Y-0.14)/0.24,2));                    // nose ridge → tip
+    h += 0.07*Math.exp(-Math.pow((Y+0.30)/0.09,2))*Math.exp(-X*X*3);                      // brow ridge
+    h -= 0.11*(Math.exp(-((X-0.33)**2*40+(Y+0.02)**2*52))+Math.exp(-((X+0.33)**2*40+(Y+0.02)**2*52))); // eye sockets
+    h -= 0.05*Math.exp(-((Y-0.56)**2*70+X*X*9));                                          // mouth line
+    return h; };
+  const eps=0.012;
+  for(let y=0;y<S;y++) for(let x=0;x<S;x++){
+    const i=(y*S+x)*4; d[i+3]=255;
+    const nx=(x-hcx)/R, ny=(y-hcy)/(R*1.12); let r2=nx*nx+ny*ny;   // slightly oval head
+    if(r2<=1){
+      const nz=Math.sqrt(1-r2);
+      const hx=(dfn(nx+eps,ny)-dfn(nx-eps,ny))/(2*eps), hy=(dfn(nx,ny+eps)-dfn(nx,ny-eps))/(2*eps);
+      let NX=nx-hx, NY=ny-hy, NZ=nz; const ln=Math.hypot(NX,NY,NZ); NX/=ln;NY/=ln;NZ/=ln;
+      const nd=NX*L[0]+NY*L[1]+NZ*L[2];
+      const diff=Math.max(0,(nd+term)/(1+term)); const dsm=diff*diff*(3-2*diff);
+      const rf2=2*nd; let sp=Math.max(0, rf2*NZ-L[2]); sp=Math.pow(sp,specSharp)*(nd>0?1:0);
+      const amb=0.10+fill*0.16;
+      // base colour: skin, darker in eye sockets / mouth, hair on top & sides
+      let base=skin;
+      const inHair = ny < -0.42 || (r2>0.72 && ny<0.15);           // hairline cap + temples
+      const inEye = (Math.hypot((nx-0.33)*1.1,(ny+0.02))<0.12)||(Math.hypot((nx+0.33)*1.1,(ny+0.02))<0.12);
+      if(inHair) base=[60,44,32];
+      else if(inEye) base=[70,58,52];
+      for(let ch=0;ch<3;ch++){ let v=base[ch]*(amb+intensity*dsm*lc[ch]); if(!inHair&&!inEye) v+=255*sp*intensity*0.5*lc[ch]; d[i+ch]=Math.max(0,Math.min(255,v)); }
+      // pupils
+      if((Math.hypot(nx-0.33,ny+0.02)<0.045)||(Math.hypot(nx+0.33,ny+0.02)<0.045)){ d[i]*=0.4;d[i+1]*=0.4;d[i+2]*=0.45; }
+      continue;
+    }
+    // shoulders (torso) — a wide rounded form below
+    const tx=(x-hcx)/(S*0.42), ty=(y-(S*0.98))/(S*0.34);
+    if(ty> -1 && ty<0 && Math.abs(tx)<1){
+      const tnz=Math.sqrt(Math.max(0,1-tx*tx*0.9)); const tnorm=[tx*0.9,-0.2,tnz]; const tl=Math.hypot(...tnorm);
+      const nd=(tnorm[0]*L[0]+tnorm[1]*L[1]+tnorm[2]*L[2])/tl; const diff=Math.max(0,(nd+term)/(1+term));
+      const cloth=[70,84,110], amb=0.14+fill*0.14;
+      for(let ch=0;ch<3;ch++){ d[i+ch]=Math.max(0,Math.min(255,cloth[ch]*(amb+intensity*diff*diff*lc[ch]))); }
+      continue;
+    }
+    // background gradient
+    const bg=18+ (1-y/S)*10; d[i]=bg*0.7;d[i+1]=bg*0.75;d[i+2]=bg;
+  }
+  ctx.putImageData(img,0,0);
+  ctx.fillStyle="rgba(0,0,0,0.55)";ctx.fillRect(0,0,S,20);ctx.font="11px monospace";ctx.fillStyle="#facc15";
+  ctx.textAlign="left"; ctx.fillText("FRONT — shaded by key (N·L + specular)",8,14);
+}
+function drawTopDown(canvas, az, dist){
+  const W=Math.min(canvas.parentElement?.clientWidth-24||300,300), H=W; canvas.width=W;canvas.height=H;
+  const ctx=canvas.getContext("2d"); ctx.clearRect(0,0,W,H);
+  const cx=W/2, cy=H*0.54, R=W*0.13;
+  // camera at bottom
+  ctx.fillStyle="#374151"; ctx.beginPath(); ctx.moveTo(cx-12,H-8); ctx.lineTo(cx+12,H-8); ctx.lineTo(cx+7,H-24); ctx.lineTo(cx-7,H-24); ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#6b7280"; ctx.font="9px monospace"; ctx.textAlign="center"; ctx.fillText("camera",cx,H-2);
+  // head from above (nose toward camera = down)
+  ctx.fillStyle="#5b4636"; ctx.beginPath(); ctx.arc(cx,cy,R,0,7); ctx.fill();
+  ctx.fillStyle="#7a5c44"; ctx.beginPath(); ctx.moveTo(cx-4,cy+R-2); ctx.lineTo(cx+4,cy+R-2); ctx.lineTo(cx,cy+R+7); ctx.closePath(); ctx.fill(); // nose
+  // azimuth ring
+  ctx.strokeStyle="#1f2937"; ctx.setLineDash([3,4]); ctx.beginPath(); ctx.arc(cx,cy,R+dist,0,7); ctx.stroke(); ctx.setLineDash([]);
+  // light marker: az measured from camera axis (front=down toward camera)
+  const a=(az)*Math.PI/180; const lx=cx+Math.sin(a)*(R+dist), ly=cy+Math.cos(a)*(R+dist);
+  // beam
+  const g=ctx.createRadialGradient(lx,ly,2,lx,ly,dist*1.1); g.addColorStop(0,"rgba(250,204,21,0.5)"); g.addColorStop(1,"rgba(250,204,21,0)");
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(lx,ly,dist*1.1,0,7); ctx.fill();
+  ctx.strokeStyle="rgba(250,204,21,0.5)"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(cx,cy); ctx.stroke();
+  ctx.fillStyle="#facc15"; ctx.beginPath(); ctx.arc(lx,ly,7,0,7); ctx.fill();
+  ctx.fillStyle="#0b0b0e"; ctx.font="bold 9px monospace"; ctx.fillText("KEY",lx,ly+3);
+  ctx.fillStyle="#6b7280"; ctx.font="9px monospace"; ctx.textAlign="left"; ctx.fillText("drag the key light →  azimuth "+Math.round(az)+"°",8,14);
+  return {cx,cy,lx,ly};
+}
+function ModulePortraitLight() {
+  const [az,setAz]=useState(33),[el,setEl]=useState(40),[intensity,setInt]=useState(0.95),[soft,setSoft]=useState(0.4),[kelvin,setKelvin]=useState(5500),[fill,setFill]=useState(0.4),[pattern,setPattern]=useState("loop");
+  const [dist]=useState(70);
+  const frontRef=useRef(), topRef=useRef(), dragRef=useRef(false);
+  useEffect(()=>{ if(frontRef.current) shadeBust(frontRef.current,{az,el,intensity,softness:soft,kelvin,fill}); },[az,el,intensity,soft,kelvin,fill]);
+  useEffect(()=>{ if(topRef.current) drawTopDown(topRef.current,az,dist); },[az,dist]);
+  const applyPattern=p=>{ const pt=LIGHT_PATTERNS.find(x=>x.id===p); if(pt){ setPattern(p); setAz(pt.az); setEl(pt.el); } };
+  const onTop=(e)=>{
+    if(!dragRef.current) return; const c=topRef.current, r=c.getBoundingClientRect();
+    const x=(e.clientX-r.left)*(c.width/r.width), y=(e.clientY-r.top)*(c.height/r.height);
+    const cx=c.width/2, cy=c.height*0.54; let a=Math.atan2(x-cx,y-cy)*180/Math.PI; // 0=down(front)
+    a=Math.max(-170,Math.min(170,a)); setAz(a); setPattern("");
+  };
+  const curNote=LIGHT_PATTERNS.find(x=>x.id===pattern)?.note;
+  return (
+    <div>
+      <InfoBox>
+        The <strong>key light</strong> is the main light that models the face — and <em>where you put it</em> is the single biggest creative choice in portraiture. Swing it around the subject (azimuth) and raise it (elevation) and the shadow of the nose and brow carves out the classic <strong>patterns</strong>: <em>butterfly</em>, <em>loop</em>, <em>Rembrandt</em>, <em>split</em>. Raise the light for a natural top-down key; drop it for an eerie under-light. <strong>Soft</strong> sources (big, close — softbox, bounce) give gentle, wide shadow edges; <strong>hard</strong> sources (small, far — bare bulb, sun) give crisp terminators and bright speculars. <strong>Fill</strong> lifts the shadow side to set the contrast ratio; <strong>colour temperature</strong> sets the mood. This is a 2.5D model — the face is shaded live by the light direction (N·L + specular). Drag the key around the top-down diagram, or pick a pattern.
+      </InfoBox>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+        {LIGHT_PATTERNS.map(p=>(
+          <button key={p.id} onClick={()=>applyPattern(p.id)} style={pattern===p.id?styles.btnActive:styles.btnChip}>{p.name}</button>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{flex:"1 1 300px",minWidth:260,background:"#0d1117",borderRadius:8,padding:12,textAlign:"center"}}>
+          <canvas ref={frontRef} style={{display:"block",width:"100%",maxWidth:360,margin:"0 auto",borderRadius:4}}/>
+        </div>
+        <div style={{flex:"1 1 260px",minWidth:240,background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12,textAlign:"center"}}>
+          <canvas ref={topRef}
+            onPointerDown={e=>{dragRef.current=true; e.currentTarget.setPointerCapture(e.pointerId); onTop(e);}}
+            onPointerMove={onTop}
+            onPointerUp={e=>{dragRef.current=false;}}
+            style={{display:"block",width:"100%",maxWidth:300,margin:"0 auto",cursor:"grab",touchAction:"none"}}/>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:18,flexWrap:"wrap",marginTop:14}}>
+        <label style={styles.label}>Azimuth: <strong style={{color:"#f59e0b"}}>{Math.round(az)}°</strong>
+          <input type="range" min={-170} max={170} step={1} value={az} onChange={e=>{setAz(+e.target.value);setPattern("");}} style={{...styles.slider,width:170}}/></label>
+        <label style={styles.label}>Elevation: <strong style={{color:"#f59e0b"}}>{Math.round(el)}°</strong>
+          <input type="range" min={-30} max={80} step={1} value={el} onChange={e=>{setEl(+e.target.value);setPattern("");}} style={{...styles.slider,width:150}}/></label>
+        <label style={styles.label}>Softness: <strong style={{color:"#f59e0b"}}>{Math.round(soft*100)}%</strong>
+          <input type="range" min={0} max={1} step={0.01} value={soft} onChange={e=>setSoft(+e.target.value)} style={{...styles.slider,width:130}}/></label>
+        <label style={styles.label}>Fill: <strong style={{color:"#f59e0b"}}>{Math.round(fill*100)}%</strong>
+          <input type="range" min={0} max={1} step={0.01} value={fill} onChange={e=>setFill(+e.target.value)} style={{...styles.slider,width:120}}/></label>
+        <label style={styles.label}>Key colour: <strong style={{color:"#f59e0b"}}>{kelvin}K</strong>
+          <input type="range" min={2800} max={8000} step={100} value={kelvin} onChange={e=>setKelvin(+e.target.value)} style={{...styles.slider,width:140}}/></label>
+      </div>
+      {curNote && <div style={{marginTop:12,padding:"10px 14px",background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,color:"#d1d5db",fontSize:13,lineHeight:1.6}}><strong style={{color:"#facc15"}}>{LIGHT_PATTERNS.find(x=>x.id===pattern)?.name}:</strong> {curNote}</div>}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MODULE: DMX Lighting Control
+// ─────────────────────────────────────────────
+const DMX_FIXTURES=[
+  {id:"dimmer",name:"Dimmer (1ch)",addr:1,chans:[{n:"Intensity",v:255}]},
+  {id:"par",name:"RGB PAR (4ch)",addr:11,chans:[{n:"Dimmer",v:255},{n:"Red",v:255},{n:"Green",v:40},{n:"Blue",v:120}]},
+  {id:"mover",name:"Moving head (8ch)",addr:21,chans:[{n:"Pan",v:128},{n:"Tilt",v:90},{n:"Dimmer",v:220},{n:"Red",v:80},{n:"Green",v:180},{n:"Blue",v:255},{n:"Strobe",v:0},{n:"Gobo",v:0}]},
+];
+function ModuleDMX() {
+  const [fixtures,setFixtures]=useState(()=>DMX_FIXTURES.map(f=>({...f,chans:f.chans.map(c=>({...c}))})));
+  const [sel,setSel]=useState("par");
+  const gridRef=useRef();
+  const f=fixtures.find(x=>x.id===sel)||fixtures[0];
+  // build the 512 universe from fixtures
+  const universe=(()=>{ const u=new Array(512).fill(0); fixtures.forEach(fx=>fx.chans.forEach((c,i)=>{ if(fx.addr+i-1<512) u[fx.addr+i-1]=c.v; })); return u; })();
+  useEffect(()=>{
+    const c=gridRef.current; if(!c)return;
+    const cols=32, rows=16, cell=Math.floor((Math.min(c.parentElement?.clientWidth-24||512,512))/cols);
+    const W=cols*cell, H=rows*cell; c.width=W;c.height=H; const ctx=c.getContext("2d"); ctx.clearRect(0,0,W,H);
+    // map which channels belong to which fixture
+    const owner=new Array(512).fill(-1); fixtures.forEach((fx,fi)=>fx.chans.forEach((_,i)=>{ if(fx.addr+i-1<512) owner[fx.addr+i-1]=fi; }));
+    const fcol=["#f59e0b","#34d399","#60a5fa"];
+    for(let idx=0;idx<512;idx++){ const x=(idx%cols)*cell, y=Math.floor(idx/cols)*cell, v=universe[idx];
+      ctx.fillStyle=`rgb(${v},${v},${v})`; ctx.fillRect(x+1,y+1,cell-2,cell-2);
+      const o=owner[idx]; if(o>=0){ ctx.strokeStyle=fcol[o%3]; ctx.lineWidth=1.5; ctx.strokeRect(x+1.5,y+1.5,cell-3,cell-3); }
+    }
+    ctx.strokeStyle="rgba(255,255,255,0.06)"; ctx.strokeRect(0.5,0.5,W-1,H-1);
+  },[fixtures,universe]);
+  const setChan=(ci,v)=>setFixtures(fs=>fs.map(fx=>fx.id===sel?{...fx,chans:fx.chans.map((c,i)=>i===ci?{...c,v}:c)}:fx));
+  const setAddr=(v)=>setFixtures(fs=>fs.map(fx=>fx.id===sel?{...fx,addr:Math.max(1,Math.min(512-fx.chans.length+1,v))}:fx));
+  // fixture visual output (colour + intensity)
+  const rgbOf=fx=>{ const get=n=>{const c=fx.chans.find(c=>c.n===n);return c?c.v:null;};
+    const dim=(get("Dimmer")??get("Intensity")??255)/255; let r=get("Red"),g=get("Green"),b=get("Blue");
+    if(r==null){r=g=b=255;} return [Math.round(r*dim),Math.round(g*dim),Math.round(b*dim)]; };
+  return (
+    <div>
+      <InfoBox>
+        <strong>DMX512</strong> is how one controller talks to many lights. A <strong>universe</strong> is <strong>512 channels</strong>, each a value <strong>0–255</strong>. A fixture is <em>patched</em> to a <strong>start address</strong> and then occupies a run of channels according to its <strong>personality</strong> (its channel map): a simple dimmer uses 1 channel, an RGB PAR 3–4, a moving head 8–32 (pan, tilt, colour, gobo, strobe…). Set a fixture to address 11 and its channels land on 11, 12, 13… — so you must leave room and never overlap two fixtures (unless you <em>want</em> them to move together). Physically it's a daisy-chain over XLR (RS-485); terminate the last fixture. When 512 channels aren't enough you add universes and send them over the network with <strong>Art-Net</strong> or <strong>sACN</strong> — the same DMX values, now riding on Ethernet to nodes that break out to the lamps. Change a channel below and watch it light up in the 512-channel grid.
+      </InfoBox>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+        {fixtures.map((fx,i)=>(
+          <button key={fx.id} onClick={()=>setSel(fx.id)} style={sel===fx.id?styles.btnActive:styles.btnChip}>
+            <span style={{color:["#f59e0b","#34d399","#60a5fa"][i%3]}}>●</span> {fx.name} @{fx.addr}
+          </button>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{flex:"1 1 300px",minWidth:280,background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style={{color:"#f3f4f6",fontWeight:"bold"}}>{f.name}</span>
+            <label style={{color:"#9ca3af",fontSize:12}}>start addr <input type="number" min={1} max={512} value={f.addr} onChange={e=>setAddr(+e.target.value)} style={{width:56,background:"#111",border:"1px solid #374151",color:"#f59e0b",borderRadius:4,padding:"2px 6px",fontFamily:"monospace"}}/></label>
+          </div>
+          <div style={{color:"#6b7280",fontSize:11,fontFamily:"monospace",marginBottom:10}}>occupies ch {f.addr}–{f.addr+f.chans.length-1}</div>
+          {f.chans.map((c,i)=>(
+            <div key={i} style={{marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+                <span style={{color:"#9ca3af"}}><span style={{color:"#6b7280",fontFamily:"monospace"}}>ch {f.addr+i}</span> · {c.n}</span>
+                <strong style={{color:"#f59e0b",fontFamily:"monospace"}}>{c.v}</strong>
+              </div>
+              <input type="range" min={0} max={255} step={1} value={c.v} onChange={e=>setChan(i,+e.target.value)} style={{...styles.slider,width:"100%"}}/>
+            </div>
+          ))}
+          <div style={{marginTop:12,display:"flex",alignItems:"center",gap:12}}>
+            <span style={{color:"#6b7280",fontSize:11,fontFamily:"monospace"}}>output</span>
+            <span style={{width:44,height:44,borderRadius:"50%",background:`rgb(${rgbOf(f).join(",")})`,boxShadow:`0 0 18px rgb(${rgbOf(f).join(",")})`,display:"inline-block",border:"1px solid #333"}}/>
+          </div>
+        </div>
+        <div style={{flex:"1 1 300px",minWidth:280,background:"#111",borderRadius:8,padding:14}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:8,letterSpacing:"0.08em"}}>UNIVERSE 1 — 512 CHANNELS (patched fixtures outlined)</div>
+          <canvas ref={gridRef} style={{display:"block",width:"100%"}}/>
+          <div style={{marginTop:10,color:"#6b7280",fontSize:11,lineHeight:1.6}}>Each square is one channel (0–255 → black→white). Coloured outlines are the three patched fixtures. Add universes + <strong style={{color:"#2dd4bf"}}>Art-Net / sACN</strong> when 512 isn't enough.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // Module registry map
 // ─────────────────────────────────────────────
 const MODULE_COMPONENTS = {
@@ -3096,6 +3321,8 @@ const MODULE_COMPONENTS = {
   codecs: ModuleCodecs,
   containers: ModuleContainers,
   signals: ModuleSignals,
+  portraitLight: ModulePortraitLight,
+  dmx: ModuleDMX,
   lensDistortion: ModuleLensDistortion,
   interlacing: ModuleInterlacing,
   halation: ModuleHalation,
@@ -3124,7 +3351,7 @@ const MODULE_COMPONENTS = {
 
 const CATEGORY_COLORS = {
   image:"#60a5fa", color:"#f59e0b", defects:"#f87171",
-  optics:"#34d399", narrative:"#a78bfa", scopes:"#22d3ee", signals:"#2dd4bf",
+  optics:"#34d399", narrative:"#a78bfa", scopes:"#22d3ee", signals:"#2dd4bf", lighting:"#facc15",
 };
 
 // ─────────────────────────────────────────────
