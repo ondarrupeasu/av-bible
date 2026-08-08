@@ -488,7 +488,9 @@ function drawChromaGrid(canvas, scheme){
   const W=gw*3+gap*2+pad*2, H=labelH+gw+22; canvas.width=W; canvas.height=H;
   const ctx=canvas.getContext("2d"); ctx.fillStyle="#07090d"; ctx.fillRect(0,0,W,H);
   const cl=v=>Math.max(0,Math.min(255,Math.round(v)));
-  const base=[]; for(let j=0;j<N;j++){ base[j]=[]; for(let i=0;i<N;i++) base[j][i]=hslToRgb(((i+j*1.4)/N)*360,0.85,0.55); }
+  // the model's own edge: green screen → skin (a slanted silhouette edge)
+  const GREEN=[22,178,66], SKIN=[228,180,138];
+  const base=[]; for(let j=0;j<N;j++){ base[j]=[]; for(let i=0;i<N;i++){ const edge=2.4+j*0.55; base[j][i]= i<edge?GREEN:SKIN; } }
   const bw=scheme==="4:1:1"?4:scheme==="4:4:4"?1:2, bh=scheme==="4:2:0"?2:1;
   const YC=(r,g,b)=>[0.2126*r+0.7152*g+0.0722*b, 128-0.168736*r-0.331264*g+0.5*b, 128+0.5*r-0.418688*g-0.081312*b];
   const RGB=(Y,cb,cr)=>[Y+1.5748*(cr-128), Y-0.1873*(cb-128)-0.4681*(cr-128), Y+1.8556*(cb-128)];
@@ -507,7 +509,7 @@ function drawChromaGrid(canvas, scheme){
     ctx.strokeStyle="rgba(255,255,255,0.08)"; ctx.lineWidth=1; ctx.strokeRect(ox,labelH,gw,gw);
   };
   ctx.font="11px monospace"; ctx.textAlign="center"; ctx.fillStyle="#9ca3af";
-  ctx.fillText("colour original",pad+gw/2,14);
+  ctx.fillText("model edge (green→skin)",pad+gw/2,14);
   ctx.fillText("chroma kept",pad+gw+gap+gw/2,14);
   ctx.fillText("reconstructed",pad+2*(gw+gap)+gw/2,14);
   grid(pad,"orig"); grid(pad+gw+gap,"kept"); grid(pad+2*(gw+gap),"recon");
@@ -1312,11 +1314,17 @@ function ModuleDepthOfField() {
       lctx.save(); lctx.translate(W/2,H/2); lctx.scale(1.06,1.06); lctx.translate(-W/2,-H/2); l.draw(lctx,W,H); lctx.restore();
       if(b<0.6){ ctx.drawImage(lc,0,0); }
       else {
-        const s=Math.max(0.04, 1/(1+b*0.5));
-        const dw=Math.max(2,Math.round(W*s)), dh=Math.max(2,Math.round(H*s));
-        const dc=document.createElement("canvas"); dc.width=dw; dc.height=dh;
-        const dctx=dc.getContext("2d"); dctx.imageSmoothingEnabled=true; dctx.drawImage(lc,0,0,dw,dh);
-        ctx.imageSmoothingEnabled=true; ctx.drawImage(dc,0,0,W,H);
+        // progressive halving → smooth blur (no pixelation), then smooth upscale back
+        const s=Math.max(0.05, 1/(1+b*0.5));
+        const steps=Math.max(1,Math.ceil(Math.log2(1/s)));
+        let cur=lc;
+        for(let k=0;k<steps;k++){
+          const nw=Math.max(2,Math.floor(cur.width/2)), nh=Math.max(2,Math.floor(cur.height/2));
+          const t=document.createElement("canvas"); t.width=nw; t.height=nh;
+          const tc=t.getContext("2d"); tc.imageSmoothingEnabled=true; tc.imageSmoothingQuality="high"; tc.drawImage(cur,0,0,nw,nh);
+          cur=t;
+        }
+        ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality="high"; ctx.drawImage(cur,0,0,W,H);
       }
     });
     // HUD on the front view
@@ -1719,27 +1727,53 @@ function ModuleColorTemp() {
 // Interior room with a bright window (the classic latitude test): the window blows out;
 // RAW keeps several stops of headroom outside, compressed clips at capture.
 function rawSceneLinear(IW,IH){
-  const buf=new Float32Array(IW*IH*3);
-  const wx0=0.40, wx1=0.90, wy0=0.16, wy1=0.76;
-  for(let y=0;y<IH;y++) for(let x=0;x<IW;x++){
-    const u=x/IW, v=y/IH; let r,g,b;
-    const inWin = u>wx0&&u<wx1&&v>wy0&&v<wy1;
-    if(inWin){
-      const wu=(u-wx0)/(wx1-wx0), wv=(v-wy0)/(wy1-wy0);
-      let sky=(2.7 - wv*1.1) * (0.8+0.45*Math.sin(wu*9+wv*4)*Math.sin(wu*4-0.6));   // bright sky + clouds
-      const mtn=0.56+0.09*Math.sin(wu*7+1);
-      let val = wv>mtn ? 1.15*(0.82+0.18*Math.sin(wu*22)) : sky;                     // mountains lower down
-      const dd=Math.hypot(wu-0.70,(wv-0.26)*1.4); if(dd<0.1) val += (0.1-dd)/0.1*7;  // sun
-      r=val*1.03; g=val; b=val*0.85;
-      if(Math.abs(wu-0.5)<0.010 || Math.abs(wv-0.52)<0.014){ r=0.04;g=0.04;b=0.05; } // window mullions
-    } else {
-      let base=0.09*(0.9+0.2*Math.sin(u*28)*Math.sin(v*16));
-      if(v>0.76) base=0.11+(v-0.76)*0.45;                    // floor
-      r=base*0.95; g=base*0.9; b=base*0.8;
-      const near=(u>wx0-0.02&&u<wx1+0.02&&v>wy0-0.03&&v<wy1+0.03); if(near){ r*=0.5;g*=0.5;b*=0.5; } // dark window frame
-      const ld=Math.hypot(u-0.15,v-0.34); if(ld<0.13){ const k=(0.13-ld)/0.13; r+=k*0.55; g+=k*0.42; b+=k*0.22; } // warm lamp (shadow detail)
-    }
-    const p=(y*IW+x)*3; buf[p]=Math.max(0,r); buf[p+1]=Math.max(0,g); buf[p+2]=Math.max(0,b);
+  const W=IW, H=IH, wx0=0.40, wx1=0.88, wy0=0.13, wy1=0.72;
+  const c=document.createElement("canvas"); c.width=W; c.height=H; const g=c.getContext("2d");
+  // ---- back wall (warm, dim) + floor
+  let wall=g.createLinearGradient(0,0,0,H); wall.addColorStop(0,"#2c2519"); wall.addColorStop(1,"#17120b");
+  g.fillStyle=wall; g.fillRect(0,0,W,H);
+  g.fillStyle="#241a11"; g.beginPath(); g.moveTo(0,H*0.74); g.lineTo(W,H*0.70); g.lineTo(W,H); g.lineTo(0,H); g.closePath(); g.fill();
+  g.strokeStyle="rgba(0,0,0,0.30)"; g.lineWidth=1;
+  for(let i=1;i<8;i++){ const x=W*i/8; g.beginPath(); g.moveTo(x,H*0.72); g.lineTo(W*0.5+(x-W*0.5)*2.2,H); g.stroke(); }
+  // ---- framed picture on the wall (shadow detail to recover)
+  g.fillStyle="#0f0b07"; g.fillRect(W*0.06,H*0.16,W*0.15,H*0.24);
+  g.fillStyle="#3a2c1e"; g.fillRect(W*0.075,H*0.185,W*0.12,H*0.19);
+  g.fillStyle="#4a566e"; g.fillRect(W*0.088,H*0.20,W*0.094,H*0.11);
+  g.fillStyle="#6b7a4a"; g.fillRect(W*0.088,H*0.31,W*0.094,H*0.065);
+  // ---- window frame + bright exterior
+  const rx=W*wx0, ry=H*wy0, rw=W*(wx1-wx0), rh=H*(wy1-wy0);
+  g.fillStyle="#0c0a07"; g.fillRect(rx-W*0.022,ry-H*0.04,rw+W*0.044,rh+H*0.08);           // frame
+  let sky=g.createLinearGradient(0,ry,0,ry+rh); sky.addColorStop(0,"#f0f5ff"); sky.addColorStop(0.65,"#dce9ff"); sky.addColorStop(1,"#cfe0f2");
+  g.fillStyle=sky; g.fillRect(rx,ry,rw,rh);
+  g.fillStyle="rgba(255,255,255,0.65)";
+  for(const [cx,cy,cr] of [[0.24,0.28,0.11],[0.58,0.20,0.085],[0.82,0.40,0.10]]){ g.beginPath(); g.ellipse(rx+rw*cx,ry+rh*cy,rw*cr,rh*cr*0.62,0,0,7); g.fill(); }
+  g.fillStyle="#9fb2cf"; g.beginPath(); g.moveTo(rx,ry+rh*0.70);                            // mountains
+  g.lineTo(rx+rw*0.20,ry+rh*0.48); g.lineTo(rx+rw*0.37,ry+rh*0.64); g.lineTo(rx+rw*0.57,ry+rh*0.40);
+  g.lineTo(rx+rw*0.80,ry+rh*0.62); g.lineTo(rx+rw,ry+rh*0.50); g.lineTo(rx+rw,ry+rh); g.lineTo(rx,ry+rh); g.closePath(); g.fill();
+  g.fillStyle="#8fa06a"; g.beginPath(); g.moveTo(rx,ry+rh*0.86); g.quadraticCurveTo(rx+rw*0.5,ry+rh*0.74,rx+rw,ry+rh*0.88); g.lineTo(rx+rw,ry+rh); g.lineTo(rx,ry+rh); g.closePath(); g.fill();
+  g.fillStyle="#ffffff"; g.beginPath(); g.arc(rx+rw*0.72,ry+rh*0.24,rh*0.11,0,7); g.fill();  // sun
+  g.fillStyle="#0c0a07"; g.fillRect(rx+rw/2-W*0.006,ry,W*0.012,rh); g.fillRect(rx,ry+rh/2-H*0.009,rw,H*0.018); // mullions
+  g.fillStyle="#1a130c"; g.fillRect(rx-W*0.035,ry+rh,rw+W*0.07,H*0.032);                    // sill
+  // ---- foreground furniture (dark silhouettes)
+  g.fillStyle="#0e0a07"; g.fillRect(W*0.07,H*0.72,W*0.27,H*0.035);                          // table top
+  g.fillRect(W*0.09,H*0.755,W*0.02,H*0.20); g.fillRect(W*0.31,H*0.755,W*0.02,H*0.20);       // table legs
+  g.fillStyle="#120d09"; g.beginPath(); g.moveTo(W*0.185,H*0.72); g.lineTo(W*0.205,H*0.72); g.lineTo(W*0.212,H*0.635); g.lineTo(W*0.178,H*0.635); g.closePath(); g.fill(); // vase
+  g.strokeStyle="#17200f"; g.lineWidth=Math.max(2,W*0.006);
+  for(const a of [-0.6,-0.2,0.15,0.5]){ g.beginPath(); g.moveTo(W*0.195,H*0.635); g.lineTo(W*0.195+Math.sin(a)*W*0.05,H*0.635-Math.cos(a)*H*0.11); g.stroke(); } // plant
+  g.fillStyle="#0d0906"; g.fillRect(W*0.315,H*0.60,W*0.016,H*0.32); g.fillRect(W*0.315,H*0.80,W*0.13,H*0.022);   // chair back+seat
+  g.fillRect(W*0.322,H*0.822,W*0.013,H*0.13); g.fillRect(W*0.428,H*0.822,W*0.013,H*0.13);   // chair legs
+  // ---- warm lamp glow (colour in the shadows)
+  g.fillStyle="#2a1c0d"; g.fillRect(W*0.125,H*0.46,W*0.028,H*0.22);
+  g.beginPath(); g.moveTo(W*0.10,H*0.46); g.lineTo(W*0.178,H*0.46); g.lineTo(W*0.163,H*0.36); g.lineTo(W*0.115,H*0.36); g.closePath(); g.fillStyle="#3a2810"; g.fill();
+  let lg=g.createRadialGradient(W*0.14,H*0.41,2,W*0.14,H*0.41,W*0.22); lg.addColorStop(0,"rgba(255,196,120,0.55)"); lg.addColorStop(1,"rgba(255,196,120,0)");
+  g.fillStyle=lg; g.fillRect(0,0,W,H);
+  // ---- to linear light; window region gets several stops of headroom
+  const d=g.getImageData(0,0,W,H).data, buf=new Float32Array(W*H*3);
+  const toLin=v=>{ v/=255; return v<=0.04045? v/12.92 : Math.pow((v+0.055)/1.055,2.4); };
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const u=x/W, v=y/H, p=(y*W+x)*4, q=(y*W+x)*3;
+    const boost = (u>wx0&&u<wx1&&v>wy0&&v<wy1) ? 6.5 : 1;   // exterior sits above display white
+    buf[q]=toLin(d[p])*boost; buf[q+1]=toLin(d[p+1])*boost; buf[q+2]=toLin(d[p+2])*boost;
   }
   return buf;
 }
