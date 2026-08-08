@@ -324,35 +324,44 @@ function ModuleResolution({ image }) {
     const img=new Image();
     img.onload=()=>{
       const c=canvasRef.current; if(!c)return;
-      const maxW=Math.min(c.parentElement?.clientWidth-32||860,860);
-      c.width=maxW; c.height=Math.round(maxW*9/16);
+      const W=Math.min(c.parentElement?.clientWidth-32||860,860);
+      c.width=W; c.height=Math.round(W*9/16); const H=c.height;
       const ctx=c.getContext("2d");
-      // draw downscaled version to simulate resolution
-      const tmp=document.createElement("canvas");
-      const scaleDown=Math.min(R.w/img.width,R.h/img.height,1);
-      tmp.width=Math.round(img.width*scaleDown||R.w);
-      tmp.height=Math.round(img.height*scaleDown||R.h);
-      tmp.getContext("2d").drawImage(img,0,0,tmp.width,tmp.height);
-      // scale back up with pixelation
-      ctx.imageSmoothingEnabled=false;
-      ctx.drawImage(tmp,0,0,c.width,c.height);
-      // pixel grid at low res
-      if(sel<=1){
-        ctx.strokeStyle="rgba(245,158,11,0.15)"; ctx.lineWidth=1;
-        const px=c.width/tmp.width;
-        for(let x=0;x<c.width;x+=px){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,c.height);ctx.stroke();}
-        for(let y=0;y<c.height;y+=Math.round(c.height/tmp.height)){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(c.width,y);ctx.stroke();}
+      ctx.fillStyle="#07090d"; ctx.fillRect(0,0,W,H);
+      // Nested rectangles to scale (all share the bottom-left corner) → see how much
+      // bigger each resolution is. 8K sets the scale.
+      const pad=Math.round(W*0.03);
+      const scale=(W-2*pad)/RESOLUTIONS[RESOLUTIONS.length-1].w;
+      const ax=pad, ay=H-pad;
+      const chip=(x,y,txt,active)=>{
+        ctx.font=`${active?"bold ":""}11px monospace`; const tw=ctx.measureText(txt).width;
+        ctx.fillStyle="rgba(0,0,0,0.7)"; ctx.fillRect(x-tw-6,y-13,tw+8,16);
+        ctx.fillStyle=active?"#f59e0b":"#9ca3af"; ctx.fillText(txt,x-tw-2,y-1);
+      };
+      // selected box: image fill first (so outlines sit on top)
+      const bw=R.w*scale, bh=R.h*scale, x=ax, y=ay-bh;
+      ctx.save(); ctx.beginPath(); ctx.rect(x,y,bw,bh); ctx.clip();
+      const ir=img.width/img.height, br=bw/bh; let dw,dh,dx,dy;
+      if(ir>br){ dh=bh; dw=bh*ir; dx=x-(dw-bw)/2; dy=y; } else { dw=bw; dh=bw/ir; dx=x; dy=y-(dh-bh)/2; }
+      ctx.drawImage(img,dx,dy,dw,dh); ctx.restore();
+      // all boxes as outlines on top (largest → smallest), selected in amber
+      for(let i=RESOLUTIONS.length-1;i>=0;i--){
+        const r=RESOLUTIONS[i], active=i===sel, w2=r.w*scale, h2=r.h*scale, x2=ax, y2=ay-h2;
+        ctx.strokeStyle=active?"#f59e0b":"rgba(160,175,195,0.32)"; ctx.lineWidth=active?2.5:1;
+        ctx.strokeRect(x2,y2,w2,h2);
+        chip(x2+w2, y2+13, r.label, active);
       }
-      ctx.fillStyle="rgba(0,0,0,0.65)"; ctx.fillRect(0,0,c.width,28);
+      // HUD
+      ctx.fillStyle="rgba(0,0,0,0.65)"; ctx.fillRect(0,0,W,24);
       ctx.fillStyle="#f59e0b"; ctx.font="bold 12px monospace";
-      ctx.fillText(`${R.w}×${R.h}  |  ${R.mp} MP  |  ${R.std}`,10,18);
+      ctx.fillText(`${R.w}×${R.h}  ·  ${R.mp} MP  ·  ${R.std}  ·  boxes drawn to scale`,10,16);
     };
     img.src=image;
   },[sel,image]);
   return (
     <div>
       <InfoBox>
-        <strong>Resolution</strong> is the total pixel count of the image matrix. It determines detail rendition, archival quality and delivery specification. <strong>Megapixels</strong> (MP) = W×H÷1,000,000. Note the difference between <em>UHD</em> (consumer, 3840×2160) and <em>DCI</em> (cinema, 4096×2160) — not the same standard. At SD you can see the pixel grid; at 4K+ individual pixels are imperceptible at normal viewing distances (ITU-R BT.2022 viewing conditions).
+        <strong>Resolution</strong> is the total pixel count of the image matrix. The nested boxes are drawn <strong>to scale</strong> — see how much larger each format is: 8K UHD holds <em>81×</em> the pixels of SD. <strong>Megapixels</strong> (MP) = W×H÷1,000,000. Note the difference between <em>UHD</em> (consumer, 3840×2160) and <em>DCI</em> (cinema, 4096×2160) — not the same standard. Higher resolution means more detail and larger files; at 4K+ individual pixels are imperceptible at normal viewing distances (ITU-R BT.2022).
       </InfoBox>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
         {RESOLUTIONS.map((r,i)=>(
@@ -360,7 +369,7 @@ function ModuleResolution({ image }) {
         ))}
       </div>
       <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
-        <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%",imageRendering:"pixelated"}}/>
+        <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
       <div style={{...styles.statRow,marginTop:12}}>
         <StatBadge label="Width" value={`${R.w} px`}/>
