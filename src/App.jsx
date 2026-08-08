@@ -1504,62 +1504,101 @@ function ModuleFrameRate() {
 // ─────────────────────────────────────────────
 // MODULE: Color Temperature
 // ─────────────────────────────────────────────
-const KELVIN_POINTS = [
-  { K:1800, label:"Candle", color:"#ff6000", scene:"Candlelit interior, fire" },
-  { K:2700, label:"Tungsten", color:"#ff8c00", scene:"Incandescent bulb, halogen" },
-  { K:3200, label:"Studio Tungsten", color:"#ffa030", scene:"TV/film tungsten fixture. Camera WB standard." },
-  { K:4000, label:"Warm white LED", color:"#ffc060", scene:"Modern LED panels, warm setting" },
-  { K:5500, label:"Daylight", color:"#fff0d0", scene:"Noon sunlight, flash. Camera WB standard." },
-  { K:6500, label:"D65 / Overcast", color:"#f0f4ff", scene:"Cloudy sky. Display calibration reference (sRGB)." },
-  { K:7500, label:"Blue sky shade", color:"#d0e8ff", scene:"Open shade under blue sky" },
-  { K:9000, label:"Deep blue sky", color:"#b0d0ff", scene:"Clear sky, no direct sun. Blue hour." },
-  { K:10000, label:"Clear blue sky", color:"#a0c8ff", scene:"Extreme blue sky. Rare in practice." },
+// Black-body colour temperature → sRGB (Tanner Helland approximation)
+function kelvinToRGB(K){
+  const t=K/100; const cl=v=>Math.max(0,Math.min(255,v));
+  let r,g,b;
+  r = t<=66 ? 255 : 329.698727*Math.pow(t-60,-0.1332047);
+  g = t<=66 ? 99.4708025861*Math.log(t)-161.1195681661 : 288.1221695283*Math.pow(t-60,-0.0755148492);
+  b = t>=66 ? 255 : (t<=19 ? 0 : 138.5177312231*Math.log(t-10)-305.0447927307);
+  return [cl(r),cl(g),cl(b)];
+}
+const CAMERA_WB = [
+  { K:3200, label:"Tungsten", icon:"💡" },
+  { K:4000, label:"Fluorescent", icon:"🏢" },
+  { K:5500, label:"Daylight", icon:"☀️" },
+  { K:6500, label:"Cloudy", icon:"☁️" },
+  { K:7500, label:"Shade", icon:"⛅" },
+];
+const LIGHT_SOURCES = [
+  { K:1900, label:"Candle / fire", icon:"🕯️" },
+  { K:2700, label:"Tungsten bulb", icon:"💡" },
+  { K:3200, label:"Studio tungsten", icon:"🎬" },
+  { K:4000, label:"Warm LED", icon:"🔆" },
+  { K:4500, label:"Fluorescent", icon:"🏢" },
+  { K:5500, label:"Midday sun", icon:"☀️" },
+  { K:6500, label:"Overcast", icon:"☁️" },
+  { K:7500, label:"Open shade", icon:"⛅" },
 ];
 
 function ModuleColorTemp() {
-  const [sel, setSel] = useState(4);
-  const K = KELVIN_POINTS[sel];
+  const [wb, setWb] = useState(2);   // Daylight
+  const [src, setSrc] = useState(5); // Midday sun
+  const canvasRef = useRef();
+  const wbK=CAMERA_WB[wb].K, srcK=LIGHT_SOURCES[src].K;
+  // White-balance cast: light colour corrected by the camera's assumed white → tint on neutrals
+  const s=kelvinToRGB(srcK), w=kelvinToRGB(wbK);
+  let g=[s[0]/w[0], s[1]/w[1], s[2]/w[2]]; const mx=Math.max(...g); g=g.map(v=>v/mx);
+  const cast=[Math.round(g[0]*255),Math.round(g[1]*255),Math.round(g[2]*255)];
+  const castCss=`rgb(${cast[0]},${cast[1]},${cast[2]})`;
+  const dK=wbK-srcK;
+  const verdict = Math.abs(dK)<=300 ? ["Neutral — whites stay white (WB matches the light)","#34d399"]
+    : dK>0 ? ["Warm / orange cast — camera WB is set higher than the light","#f59e0b"]
+           : ["Cool / blue cast — camera WB is set lower than the light","#60a5fa"];
+  const tint=(base)=>`rgb(${Math.round(base[0]*cast[0]/255)},${Math.round(base[1]*cast[1]/255)},${Math.round(base[2]*cast[2]/255)})`;
+
+  useEffect(()=>{
+    const c=canvasRef.current; if(!c)return;
+    const W=Math.min(c.parentElement?.clientWidth-32||560,600); c.width=W; c.height=Math.round(W*9/16);
+    const ctx=c.getContext("2d");
+    drawScene(ctx,c.width,c.height);
+    ctx.globalCompositeOperation="multiply"; ctx.fillStyle=castCss; ctx.fillRect(0,0,c.width,c.height);
+    ctx.globalCompositeOperation="source-over";
+    ctx.fillStyle="rgba(0,0,0,0.6)"; ctx.fillRect(0,0,c.width,24);
+    ctx.fillStyle="#f59e0b"; ctx.font="bold 12px monospace";
+    ctx.fillText(`WB ${wbK}K  ·  light ${srcK}K  ·  ${dK>0?"+":""}${dK}K`,10,16);
+  },[wb,src,castCss]);
+
+  const Row=({items,active,onPick,swatchK})=>(
+    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      {items.map((it,i)=>(
+        <button key={i} onClick={()=>onPick(i)} style={{
+          ...(i===active?styles.btnActive:styles.btnChip),
+          display:"flex",alignItems:"center",gap:5,
+        }}>
+          <span style={{width:12,height:12,borderRadius:3,display:"inline-block",background:`rgb(${kelvinToRGB(it.K).join(",")})`,border:"1px solid #0006"}}/>
+          {it.icon} {it.label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div>
       <InfoBox>
-        <strong>Colour temperature</strong> (measured in Kelvin, K) describes the colour of a light source by comparing it to a theoretical <em>black body radiator</em> heated to that temperature. Counter-intuitively: <strong>lower K = warmer (reddish)</strong>; <strong>higher K = cooler (bluish)</strong>. The camera's <strong>white balance</strong> compensates: if you set WB to 3200K with daylight (5500K) source, the image goes blue — this is intentional for creative effect. The <strong>D65</strong> (6500K) standard is the reference white for sRGB, Rec.709 and Rec.2020 (ITU-R BT.709, clause 1). In the ACES pipeline, all IDTs normalise to D60 (6000K) — slightly warmer than D65.
+        <strong>Colour temperature</strong> (Kelvin) describes a light's colour vs a black-body radiator: <strong>lower K = warmer (reddish)</strong>, <strong>higher K = cooler (bluish)</strong>. The camera's <strong>white balance</strong> tells it what colour to treat as white. When <em>WB matches the light</em>, whites stay white. When they differ, you get a <strong>cast</strong>: set WB higher than the light → warm/orange image; set it lower → blue image. Pick a camera WB mode and a real light source below and watch the cast on the scene. This mismatch is often used <em>creatively</em> (e.g. tungsten WB under daylight for a cold look). D65 (6500K) is the reference white for sRGB/Rec.709.
       </InfoBox>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
-        {KELVIN_POINTS.map((k,i)=>(
-          <button key={k.K} onClick={()=>setSel(i)}
-            style={{...styles.btnChip,...(i===sel?{borderColor:k.color,color:k.color,background:k.color+"22"}:{})}}>
-            {k.label}
-          </button>
-        ))}
+      <div style={{marginBottom:12}}>
+        <div style={{color:"#6b7280",fontSize:11,fontFamily:"monospace",marginBottom:6}}>📷 CAMERA WHITE BALANCE</div>
+        <Row items={CAMERA_WB} active={wb} onPick={setWb}/>
       </div>
-      <div style={{display:"flex",gap:16,alignItems:"flex-start",flexWrap:"wrap"}}>
-        <div style={{
-          width:160,height:220,borderRadius:12,
-          background:`linear-gradient(180deg,${K.color},rgba(0,0,0,0.3))`,
-          border:"1px solid #1f2937",display:"flex",flexDirection:"column",
-          alignItems:"center",justifyContent:"flex-end",padding:16,
-        }}>
-          <div style={{color:"#000",fontWeight:"bold",fontSize:24,textShadow:"0 0 10px rgba(255,255,255,0.5)"}}>{K.K}K</div>
-          <div style={{color:"#000",fontSize:12,marginTop:4,textShadow:"0 0 8px rgba(255,255,255,0.8)"}}>{K.label}</div>
+      <div style={{marginBottom:14}}>
+        <div style={{color:"#6b7280",fontSize:11,fontFamily:"monospace",marginBottom:6}}>💡 SCENE LIGHT SOURCE</div>
+        <Row items={LIGHT_SOURCES} active={src} onPick={setSrc}/>
+      </div>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{flex:"1 1 360px",minWidth:280,background:"#111",borderRadius:8,padding:12}}>
+          <canvas ref={canvasRef} style={{display:"block",width:"100%",borderRadius:4}}/>
+          <div style={{marginTop:8,color:verdict[1],fontSize:13,fontWeight:"bold"}}>{verdict[0]}</div>
         </div>
-        <div style={{flex:1,minWidth:200}}>
-          <div style={{background:"#111",border:"1px solid #1f2937",borderRadius:8,padding:16,marginBottom:12}}>
-            <div style={{color:"#6b7280",fontSize:11,fontFamily:"monospace",marginBottom:4}}>SCENE CONTEXT</div>
-            <div style={{color:"#e5e7eb"}}>{K.scene}</div>
-          </div>
-          {/* Gradient bar */}
-          <div style={{borderRadius:8,overflow:"hidden",height:32,
-            background:"linear-gradient(90deg,#ff4000,#ff8c00,#ffc060,#fff0d0,#f0f4ff,#b0d0ff,#80b0ff)"
-          }}/>
-          <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
-            <span style={{color:"#6b7280",fontSize:10}}>1800K</span>
-            <span style={{color:"#6b7280",fontSize:10}}>← Warm · Cool →</span>
-            <span style={{color:"#6b7280",fontSize:10}}>10000K</span>
-          </div>
-          <div style={styles.statRow}>
-            <StatBadge label="WB Shift" value={K.K<5500?"Add blue":"Add orange"}/>
-            <StatBadge label="Hex" value={K.color}/>
-          </div>
+        <div style={{flex:"0 1 auto",background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:8}}>NEUTRAL REFERENCES</div>
+          {[["White",[245,245,245]],["Grey",[150,150,150]],["Skin",[224,172,120]]].map(([lbl,base])=>(
+            <div key={lbl} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+              <span style={{width:44,height:28,borderRadius:4,background:tint(base),border:"1px solid #0008"}}/>
+              <span style={{color:"#9ca3af",fontSize:12,fontFamily:"monospace"}}>{lbl}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
