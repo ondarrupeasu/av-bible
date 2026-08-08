@@ -431,62 +431,68 @@ function ChromaBlock({ scheme }) {
   );
 }
 
-function ModuleChromaSubsampling({ image }) {
-  const [sel, setSel] = useState(1);
+// Test pattern with saturated colour edges — where subsampling visibly smears chroma
+function drawChromaTest(ctx,W,H){
+  const bars=[[235,235,235],[235,235,16],[16,235,235],[16,235,16],[235,16,235],[235,16,16],[16,16,235]];
+  const bh=Math.round(H*0.5), bw=W/bars.length;
+  bars.forEach((c,i)=>{ ctx.fillStyle=`rgb(${c[0]},${c[1]},${c[2]})`; ctx.fillRect(Math.round(i*bw),0,Math.ceil(bw)+1,bh); });
+  // fine alternating red/blue vertical lines (high chroma frequency → smears)
+  const y2=bh, h2=H-bh, lh=Math.round(h2*0.55);
+  for(let x=0;x<W*0.5;x+=6){ ctx.fillStyle=(Math.floor(x/6)%2)?"#ff2018":"#1830ff"; ctx.fillRect(x,y2,6,lh); }
+  ctx.fillStyle="#0a0a12"; ctx.fillRect(0,y2+lh,W*0.5,h2-lh);
+  ctx.fillStyle="#9ca3af"; ctx.font="11px monospace"; ctx.fillText("fine R/B lines",8,y2+lh+18);
+  // saturated red + green text on blue (colour edges)
+  ctx.fillStyle="#0018e0"; ctx.fillRect(W*0.5,y2,W*0.5,h2);
+  ctx.font=`bold ${Math.round(h2*0.34)}px monospace`;
+  ctx.fillStyle="#ff2018"; ctx.fillText("4:4:4",W*0.53,y2+h2*0.42);
+  ctx.fillStyle="#18e048"; ctx.fillText("chroma",W*0.53,y2+h2*0.82);
+}
+
+function ModuleChromaSubsampling() {
+  const [sel, setSel] = useState(2);
   const S = SAMPLING[sel];
   const canvasRef = useRef();
   useEffect(()=>{
-    const img=new Image();
-    img.onload=()=>{
-      const c=canvasRef.current; if(!c)return;
-      const maxW=Math.min(c.parentElement?.clientWidth-32||780,780);
-      c.width=maxW; c.height=Math.round(maxW*9/16);
-      const ctx=c.getContext("2d");
-      const tmp=document.createElement("canvas");
-      tmp.width=c.width; tmp.height=c.height;
-      tmp.getContext("2d").drawImage(img,0,0,c.width,c.height);
-      const imageData=tmp.getContext("2d").getImageData(0,0,c.width,c.height);
-      const d=imageData.data;
-      // Convert to YCbCr, subsample, convert back
-      const ySampled=[], cbSampled=[], crSampled=[];
-      for(let i=0;i<d.length;i+=4){
-        const r=d[i],g=d[i+1],b=d[i+2];
-        ySampled.push(0.2126*r+0.7152*g+0.0722*b);
-        cbSampled.push(128-0.168736*r-0.331264*g+0.5*b);
-        crSampled.push(128+0.5*r-0.418688*g-0.081312*b);
+    const c=canvasRef.current; if(!c)return;
+    const maxW=Math.min(c.parentElement?.clientWidth-32||780,780);
+    c.width=maxW; c.height=Math.round(maxW*9/16);
+    const ctx=c.getContext("2d");
+    const tmp=document.createElement("canvas"); tmp.width=c.width; tmp.height=c.height;
+    drawChromaTest(tmp.getContext("2d"), c.width, c.height);
+    const imageData=tmp.getContext("2d").getImageData(0,0,c.width,c.height);
+    const d=imageData.data;
+    const ySampled=[], cbSampled=[], crSampled=[];
+    for(let i=0;i<d.length;i+=4){
+      const r=d[i],g=d[i+1],b=d[i+2];
+      ySampled.push(0.2126*r+0.7152*g+0.0722*b);
+      cbSampled.push(128-0.168736*r-0.331264*g+0.5*b);
+      crSampled.push(128+0.5*r-0.418688*g-0.081312*b);
+    }
+    const W=c.width;
+    for(let py=0;py<c.height;py++){
+      for(let px=0;px<W;px++){
+        const idx=(py*W+px)*4;
+        const Y=ySampled[py*W+px];
+        let cbSrc=px, crSrc=px, cbRow=py, crRow=py;
+        if(sel>=1){ cbSrc=Math.floor(px/2)*2; crSrc=cbSrc; }
+        if(sel===2){ cbRow=Math.floor(py/2)*2; crRow=cbRow; }
+        if(sel===3){ cbSrc=Math.floor(px/4)*4; crSrc=cbSrc; }
+        const cb=cbSampled[cbRow*W+cbSrc];
+        const cr=crSampled[crRow*W+crSrc];
+        d[idx]  =Math.max(0,Math.min(255,Y+1.5748*(cr-128)));
+        d[idx+1]=Math.max(0,Math.min(255,Y-0.1873*(cb-128)-0.4681*(cr-128)));
+        d[idx+2]=Math.max(0,Math.min(255,Y+1.8556*(cb-128)));
       }
-      // Apply subsampling
-      const W=c.width;
-      for(let py=0;py<c.height;py++){
-        for(let px=0;px<W;px++){
-          const idx=(py*W+px)*4;
-          const Y=ySampled[py*W+px];
-          let cbSrc=px, crSrc=px, cbRow=py, crRow=py;
-          if(sel>=1) cbSrc=Math.floor(px/2)*2;
-          if(sel>=1) crSrc=Math.floor(px/2)*2;
-          if(sel===2||sel===3) cbRow=Math.floor(py/2)*2;
-          if(sel===2||sel===3) crRow=Math.floor(py/2)*2;
-          if(sel===3) cbSrc=Math.floor(px/4)*4;
-          if(sel===3) crSrc=Math.floor(px/4)*4;
-          const cb=cbSampled[cbRow*W+cbSrc];
-          const cr=crSampled[crRow*W+crSrc];
-          const R=Math.max(0,Math.min(255,Y+1.5748*(cr-128)));
-          const G=Math.max(0,Math.min(255,Y-0.1873*(cb-128)-0.4681*(cr-128)));
-          const B=Math.max(0,Math.min(255,Y+1.8556*(cb-128)));
-          d[idx]=R; d[idx+1]=G; d[idx+2]=B;
-        }
-      }
-      ctx.putImageData(imageData,0,0);
-      ctx.fillStyle="rgba(0,0,0,0.65)"; ctx.fillRect(0,0,c.width,26);
-      ctx.fillStyle="#f59e0b"; ctx.font="bold 12px monospace";
-      ctx.fillText(`Chroma Subsampling: ${S.label}  |  Bandwidth: ${S.bandwidth}`,10,17);
-    };
-    img.src=image;
-  },[sel,image]);
+    }
+    ctx.putImageData(imageData,0,0);
+    ctx.fillStyle="rgba(0,0,0,0.65)"; ctx.fillRect(0,0,c.width,26);
+    ctx.fillStyle="#f59e0b"; ctx.font="bold 12px monospace";
+    ctx.fillText(`${S.label}  ·  chroma bandwidth ${S.bandwidth}  ·  toggle 4:4:4 ↔ 4:1:1 to see the smearing`,10,17);
+  },[sel]);
   return (
     <div>
       <InfoBox>
-        <strong>Chroma subsampling</strong> exploits the human visual system's lower acuity for color (chrominance) vs brightness (luminance). The notation <em>J:a:b</em> describes sample distribution across 2 rows of 4 pixels: J=luma samples, a=Cb samples row 1, b=Cb samples row 2. <strong>4:2:0</strong> is standard in H.264/H.265 and most camera codecs. <strong>4:2:2</strong> is the broadcast production standard. Green-screen and VFX always require <strong>4:4:4</strong>.
+        <strong>Chroma subsampling</strong> exploits the eye's lower acuity for colour (chrominance) than brightness (luminance). The notation <em>J:a:b</em> describes chroma sampling across 2 rows of 4 pixels. Luma (Y) is always kept at full resolution; only <strong>Cb</strong> (blue-difference) and <strong>Cr</strong> (red-difference) are reduced — there is no separate green channel, green is reconstructed from Y, Cb and Cr. Watch the <strong>saturated colour edges</strong> below smear horizontally as you go from 4:4:4 to 4:1:1, while the luma stays sharp. <strong>4:2:0</strong> is standard in H.264/H.265; <strong>4:2:2</strong> is the broadcast production standard; green-screen and VFX need <strong>4:4:4</strong>.
       </InfoBox>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
         {SAMPLING.map((s,i)=>(
