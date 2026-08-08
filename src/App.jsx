@@ -133,7 +133,7 @@ const SCENE_LAYERS = [
   { name:"sky", depth:600, draw:(ctx,W,H)=>{
     const horizon=H*0.60;
     const sky=ctx.createLinearGradient(0,0,0,horizon);
-    sky.addColorStop(0,"#3a5f7d"); sky.addColorStop(0.65,"#8aa8bc"); sky.addColorStop(1,"#c7d6d9");
+    sky.addColorStop(0,"#33506a"); sky.addColorStop(0.6,"#5f7f90"); sky.addColorStop(1,"#7e969b");
     ctx.fillStyle=sky; ctx.fillRect(0,0,W,horizon);
     const sunX=W*0.80, sunY=H*0.16, sunR=H*0.045;
     const glow=ctx.createRadialGradient(sunX,sunY,sunR*0.3,sunX,sunY,sunR*5);
