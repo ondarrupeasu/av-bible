@@ -1185,103 +1185,89 @@ function ModuleACES() {
 // ─────────────────────────────────────────────
 // MODULE: Depth of Field
 // ─────────────────────────────────────────────
+// Approximate real-world distance (m) of each scene layer, for DoF blur.
+const LAYER_DIST = { sky:600, mountains:300, hills:120, ground:22, house:16, midtree:8, subject:5, foreground:1.8 };
+
 function ModuleDepthOfField() {
   const [fstop, setFstop] = useState(2.8);
   const [focal, setFocal] = useState(50);
-  const [distance, setDistance] = useState(3);
+  const [distance, setDistance] = useState(5);
   const canvasRef = useRef();
 
-  // Simplified DoF calculation (thin lens, circle of confusion 0.03mm for 35mm equiv)
-  const CoC = 0.03;
-  const focalMm = focal;
-  const distanceMm = distance * 1000;
-  const N = fstop;
-  const Dn = (distanceMm * (distanceMm - focalMm)) / (distanceMm - focalMm + N * CoC * distanceMm / focalMm);
-  const Df = (distanceMm * (distanceMm - focalMm)) / (distanceMm - focalMm - N * CoC * distanceMm / focalMm);
-  const dof = Math.max(0, (isFinite(Df)?Df:99999) - Dn);
-  const dofM = dof / 1000;
+  // Thin-lens DoF limits (CoC 0.03mm, 35mm format). All in mm.
+  const CoC=0.03, f=focal, N=fstop, s=distance*1000;
+  const Hmm = f*f/(N*CoC)+f;                 // hyperfocal
+  const Dn = (s*(Hmm-f))/(Hmm+s-2*f);
+  const farInf = (Hmm-s)<=0;
+  const Df = farInf ? Infinity : (s*(Hmm-f))/(Hmm-s);
+  const dofM = farInf ? Infinity : (Df-Dn)/1000;
 
   useEffect(()=>{
     const c=canvasRef.current; if(!c)return;
-    c.width=480; c.height=200;
+    const W=Math.min(c.parentElement?.clientWidth-32||840,840);
+    c.width=W; c.height=Math.round(W*9/16); const H=c.height;
     const ctx=c.getContext("2d");
-    ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,0,480,200);
-    // Scene depth representation
-    const sceneDepth=10; // meters
-    const focusX=(distance/sceneDepth)*440+20;
-    const nearX=Math.max(20,(Dn/1000/sceneDepth)*440+20);
-    const farX=Math.min(460,(Math.min(isFinite(Df)?Df/1000:100,sceneDepth)/sceneDepth)*440+20);
-    // Blur zones
-    const bgrad=ctx.createLinearGradient(20,0,460,0);
-    bgrad.addColorStop(0,"rgba(96,165,250,0.3)");
-    bgrad.addColorStop(nearX/480,"rgba(96,165,250,0.05)");
-    bgrad.addColorStop(farX/480,"rgba(96,165,250,0.05)");
-    bgrad.addColorStop(1,"rgba(96,165,250,0.3)");
-    ctx.fillStyle=bgrad; ctx.fillRect(20,40,440,120);
-    // Sharp zone
-    ctx.fillStyle="rgba(52,211,153,0.15)";
-    ctx.fillRect(nearX,40,farX-nearX,120);
-    // Focus marker
-    ctx.strokeStyle="#f59e0b"; ctx.lineWidth=2;
-    ctx.beginPath();ctx.moveTo(focusX,30);ctx.lineTo(focusX,170);ctx.stroke();
-    ctx.fillStyle="#f59e0b"; ctx.font="10px monospace";
-    ctx.fillText(`Focus: ${distance}m`,focusX-20,22);
-    // DoF zone markers
-    if(nearX>20){
-      ctx.strokeStyle="#34d399"; ctx.lineWidth=1; ctx.setLineDash([4,4]);
-      ctx.beginPath();ctx.moveTo(nearX,40);ctx.lineTo(nearX,170);ctx.stroke();
-    }
-    if(farX<460){
-      ctx.strokeStyle="#34d399";
-      ctx.beginPath();ctx.moveTo(farX,40);ctx.lineTo(farX,170);ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    // Bokeh circles (out of focus areas)
-    for(let x=20;x<nearX-10;x+=15){
-      const blur=((nearX-x)/(nearX-20))*12*N;
-      ctx.strokeStyle=`rgba(245,158,11,${Math.min(0.6,blur/20)})`;
-      ctx.lineWidth=Math.max(1,blur*0.3);
-      ctx.beginPath();ctx.arc(x+Math.random()*5,100+Math.random()*30-15,blur*0.5,0,Math.PI*2);ctx.stroke();
-    }
-    // Axis
-    ctx.strokeStyle="#374151"; ctx.lineWidth=1;
-    ctx.beginPath();ctx.moveTo(20,170);ctx.lineTo(460,170);ctx.stroke();
-    for(let m=0;m<=sceneDepth;m+=2){
-      const x=(m/sceneDepth)*440+20;
-      ctx.fillStyle="#4b5563"; ctx.font="9px monospace";
-      ctx.fillText(`${m}m`,x-6,185);
-      ctx.strokeStyle="#1f2937";
-      ctx.beginPath();ctx.moveTo(x,166);ctx.lineTo(x,172);ctx.stroke();
-    }
-    // Legend
-    ctx.fillStyle="rgba(0,0,0,0.8)"; ctx.fillRect(0,0,480,22);
-    ctx.fillStyle="#9ca3af"; ctx.font="11px monospace";
-    ctx.fillText(`f/${fstop}  ${focal}mm  @${distance}m  |  DoF: ${dofM>50?"∞":dofM.toFixed(2)+"m"}  |  Near: ${(Dn/1000).toFixed(2)}m  Far: ${isFinite(Df)&&Df/1000<50?(Df/1000).toFixed(2)+"m":"∞"}`,8,14);
+    ctx.fillStyle="#07090d"; ctx.fillRect(0,0,W,H);
+    const Dfmm=distance*1000;
+    const blurFor=depthM=>{
+      const D=depthM*1000;
+      const coc=(f*f/(N*Math.max(1,Dfmm-f)))*Math.abs(D-Dfmm)/D;   // CoC in mm
+      return Math.min(24, coc*22);                                 // → display px
+    };
+    // Scene layers, each blurred by its distance from the focus plane
+    SCENE_LAYERS.forEach(l=>{
+      const b=blurFor(LAYER_DIST[l.name] ?? l.depth);
+      ctx.save();
+      ctx.filter = b>0.4 ? `blur(${b.toFixed(1)}px)` : "none";
+      ctx.translate(W/2,H/2); ctx.scale(1.06,1.06); ctx.translate(-W/2,-H/2);   // overscan hides blurred edges
+      l.draw(ctx,W,H);
+      ctx.restore();
+    });
+    ctx.filter="none";
+    // Depth ruler (log scale) — where each element sits + the in-focus band
+    const pad=44, rulerY=H-26, x1=pad, x2=W-16;
+    const lx=d=>x1+(Math.log(Math.max(1,d))/Math.log(600))*(x2-x1);
+    ctx.strokeStyle="#374151"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x1,rulerY); ctx.lineTo(x2,rulerY); ctx.stroke();
+    // sharp band
+    const bx1=lx(Dn/1000), bx2=lx(farInf?600:Df/1000);
+    ctx.fillStyle="rgba(52,211,153,0.35)"; ctx.fillRect(bx1,rulerY-4,Math.max(2,bx2-bx1),8);
+    // focus marker
+    ctx.strokeStyle="#f59e0b"; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(lx(distance),rulerY-8); ctx.lineTo(lx(distance),rulerY+8); ctx.stroke();
+    // element ticks
+    ctx.font="9px monospace"; ctx.textAlign="center";
+    [["FG",1.8],["subj",5],["tree",8],["house",16],["mtns",300]].forEach(([lbl,d])=>{
+      const x=lx(d); ctx.fillStyle="#6b7280"; ctx.beginPath();ctx.arc(x,rulerY,2,0,7);ctx.fill(); ctx.fillText(lbl,x,rulerY+16);
+    });
+    ctx.textAlign="left";
+    // HUD
+    ctx.fillStyle="rgba(0,0,0,0.65)"; ctx.fillRect(0,0,W,24);
+    ctx.fillStyle="#f59e0b"; ctx.font="bold 12px monospace";
+    ctx.fillText(`f/${fstop}  ${focal}mm  focus ${distance}m  ·  DoF ${dofM===Infinity?"∞":dofM.toFixed(2)+"m"}  ·  green = in focus`,10,16);
   },[fstop,focal,distance]);
 
   return (
     <div>
       <InfoBox>
-        <strong>Depth of Field (DoF)</strong> is the range of distances within which subjects appear acceptably sharp. It is determined by: <em>aperture</em> (smaller f-stop = wider aperture = shallower DoF), <em>focal length</em> (longer lens = shallower DoF), and <em>subject distance</em> (closer subject = shallower DoF). The mathematical model uses the <strong>Circle of Confusion (CoC)</strong> — the maximum acceptable blur circle diameter for the sensor/film format (typically 0.03mm for 35mm). Beyond the <em>hyperfocal distance</em>, everything from half that distance to infinity is sharp. Shallow DoF is a primary tool for subject isolation; deep DoF places everything in context.
+        <strong>Depth of Field (DoF)</strong> is the range of distances that appears acceptably sharp. It depends on <em>aperture</em> (smaller f-stop = wider = shallower DoF), <em>focal length</em> (longer = shallower), and <em>focus distance</em> (closer = shallower). Here the <strong>scene elements at different distances</strong> (foreground bush ~1.8 m, subject ~5 m, tree ~8 m, house ~16 m, hills/mountains far away) blur according to a thin-lens <strong>Circle of Confusion</strong> model (0.03 mm, 35 mm format). Open the aperture or move focus and watch which planes fall out of focus. Beyond the <em>hyperfocal distance</em> everything to infinity is sharp. Shallow DoF isolates the subject; deep DoF holds context.
       </InfoBox>
       <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:12}}>
         <label style={styles.label}>
           Aperture: <strong style={{color:"#f59e0b"}}>f/{fstop}</strong>
-          <input type="range" min={1.0} max={22} step={0.1} value={fstop} onChange={e=>setFstop(+e.target.value)} style={styles.slider}/>
+          <input type="range" min={1.2} max={22} step={0.1} value={fstop} onChange={e=>setFstop(+e.target.value)} style={styles.slider}/>
         </label>
         <label style={styles.label}>
           Focal length: <strong style={{color:"#f59e0b"}}>{focal}mm</strong>
-          <input type="range" min={10} max={300} step={5} value={focal} onChange={e=>setFocal(+e.target.value)} style={styles.slider}/>
+          <input type="range" min={16} max={200} step={1} value={focal} onChange={e=>setFocal(+e.target.value)} style={styles.slider}/>
         </label>
         <label style={styles.label}>
           Focus distance: <strong style={{color:"#f59e0b"}}>{distance}m</strong>
-          <input type="range" min={0.5} max={10} step={0.1} value={distance} onChange={e=>setDistance(+e.target.value)} style={styles.slider}/>
+          <input type="range" min={1} max={40} step={0.5} value={distance} onChange={e=>setDistance(+e.target.value)} style={styles.slider}/>
         </label>
       </div>
       <div style={{...styles.statRow,marginBottom:12}}>
-        <StatBadge label="DoF" value={dofM>50?"∞":dofM.toFixed(2)+"m"}/>
+        <StatBadge label="DoF" value={dofM===Infinity?"∞":dofM.toFixed(2)+"m"}/>
         <StatBadge label="Near limit" value={(Dn/1000).toFixed(2)+"m"}/>
-        <StatBadge label="Far limit" value={isFinite(Df)&&Df/1000<50?(Df/1000).toFixed(2)+"m":"∞"}/>
+        <StatBadge label="Far limit" value={farInf?"∞":(Df/1000).toFixed(2)+"m"}/>
       </div>
       <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
@@ -1650,125 +1636,58 @@ function ModuleRAW({ image }) {
 // ─────────────────────────────────────────────
 // MODULE: Camera Movement
 // ─────────────────────────────────────────────
-const MOVEMENTS = [
-  { label:"Pan", note:"Horizontal rotation around the camera's vertical axis. Camera stays in place. Follows action or reveals the scene.", animate:(c,t)=>{
-    const ctx=c.getContext("2d"); ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,0,c.width,c.height);
-    const panX=Math.sin(t*0.7)*c.width*0.25;
-    // Scene
-    for(let i=0;i<8;i++){
-      const x=((i/8)*c.width+panX)%c.width; const y=c.height*0.3+Math.sin(i)*20;
-      ctx.fillStyle="#1f2937"; ctx.fillRect(x-20,y,40,c.height*0.5);
-      ctx.fillStyle="#f59e0b33"; ctx.fillRect(x-8,y+30,16,20);
-    }
-    // Frame indicator
-    const fw=c.width*0.5; const fh=c.height*0.7;
-    const fx=(c.width-fw)/2, fy=(c.height-fh)/2;
-    ctx.strokeStyle="#f59e0b"; ctx.lineWidth=2; ctx.strokeRect(fx,fy,fw,fh);
-    ctx.fillStyle="#f59e0b"; ctx.font="11px monospace";
-    ctx.fillText(`← PAN → ${Math.round(Math.sin(t*0.7)*30)}°`,fx+8,fy+16);
-  }},
-  { label:"Tilt", note:"Vertical rotation around the camera's horizontal axis. Looks up or down. Establishes scale or follows vertical movement.", animate:(c,t)=>{
-    const ctx=c.getContext("2d"); ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,0,c.width,c.height);
-    const tiltY=Math.sin(t*0.7)*c.height*0.25;
-    // Building
-    for(let i=0;i<12;i++){
-      const y=((i/12)*c.height+tiltY)%c.height;
-      ctx.fillStyle="#1f2937"; ctx.fillRect(c.width*0.35,y-5,c.width*0.3,12);
-    }
-    const fw=c.width*0.6; const fh=c.height*0.5;
-    const fx=(c.width-fw)/2, fy=(c.height-fh)/2;
-    ctx.strokeStyle="#60a5fa"; ctx.lineWidth=2; ctx.strokeRect(fx,fy,fw,fh);
-    ctx.fillStyle="#60a5fa"; ctx.font="11px monospace";
-    ctx.fillText(`↑ TILT ${Math.round(Math.sin(t*0.7)*20)}° ↓`,fx+8,fy+16);
-  }},
-  { label:"Dolly/Track", note:"Camera physically moves along its optical axis (in/out) or laterally. True perspective change — background relationship shifts. Different from zoom.", animate:(c,t)=>{
-    const ctx=c.getContext("2d"); ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,0,c.width,c.height);
-    const scale=1+Math.sin(t*0.5)*0.3;
-    const cx=c.width/2, cy=c.height/2;
-    // Draw perspective grid
-    for(let i=1;i<5;i++){
-      const s=i*scale*0.2;
-      const w=c.width*s, h=c.height*s;
-      ctx.strokeStyle=`rgba(31,41,55,${i*0.3})`; ctx.lineWidth=1;
-      ctx.strokeRect(cx-w/2,cy-h/2,w,h);
-      ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx-w/2,cy-h/2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+w/2,cy-h/2); ctx.stroke();
-    }
-    ctx.strokeStyle="#34d399"; ctx.lineWidth=2;
-    const s=0.6*scale;
-    ctx.strokeRect(cx-c.width*s/2,cy-c.height*s/2,c.width*s,c.height*s);
-    ctx.fillStyle="#34d399"; ctx.font="11px monospace";
-    ctx.fillText(`DOLLY IN/OUT  scale: ×${scale.toFixed(2)}`,cx-c.width*s/2+8,cy-c.height*s/2+16);
-  }},
-  { label:"Crane/Jib", note:"Camera moves vertically (up/down) while maintaining horizontal position. Reveals or conceals — epic 'God's eye view' effect.", animate:(c,t)=>{
-    const ctx=c.getContext("2d"); ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,0,c.width,c.height);
-    const craneY=Math.sin(t*0.5)*c.height*0.3;
-    // Ground plane perspective
-    ctx.fillStyle="#111827";
-    ctx.beginPath(); ctx.moveTo(0,c.height*0.7-craneY); ctx.lineTo(c.width,c.height*0.7-craneY); ctx.lineTo(c.width,c.height); ctx.lineTo(0,c.height); ctx.closePath(); ctx.fill();
-    // Buildings at horizon
-    [80,160,260,360,430].forEach((x,i)=>{
-      const h=60+i*20;
-      ctx.fillStyle="#1f2937";
-      const drawY=c.height*0.7-craneY-h;
-      ctx.fillRect(x,drawY,40,h);
-    });
-    ctx.strokeStyle="#a78bfa"; ctx.lineWidth=2;
-    ctx.strokeRect(c.width*0.2,c.height*0.2,c.width*0.6,c.height*0.5);
-    ctx.fillStyle="#a78bfa"; ctx.font="11px monospace";
-    ctx.fillText(`CRANE  height: ${craneY>0?"+":" "}${Math.round(craneY*0.05)}m`,c.width*0.2+8,c.height*0.2+16);
-  }},
-  { label:"Handheld", note:"Camera held by operator. Organic, unstable movement. Conveys documentary realism, urgency or intimacy (Dogme 95, Bourne series).", animate:(c,t)=>{
-    const ctx=c.getContext("2d"); ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,0,c.width,c.height);
-    // Shake simulation
-    const shakeX=Math.sin(t*7.3)*4+Math.sin(t*13.1)*2+Math.sin(t*31)*1;
-    const shakeY=Math.sin(t*5.7)*3+Math.sin(t*11.9)*2+Math.sin(t*27)*1;
-    const shakeR=Math.sin(t*4.1)*0.015;
-    ctx.save();
-    ctx.translate(c.width/2+shakeX,c.height/2+shakeY);
-    ctx.rotate(shakeR);
-    ctx.translate(-c.width/2,-c.height/2);
-    // Scene
-    ctx.fillStyle="#1a2f44"; ctx.fillRect(60,80,160,160); // building
-    ctx.fillStyle="#3d2b1f"; ctx.fillRect(280,120,100,120);
-    ctx.fillStyle="#2d5a1b"; ctx.beginPath();ctx.arc(200,200,40,0,Math.PI*2);ctx.fill();
-    ctx.restore();
-    ctx.strokeStyle="#f87171"; ctx.lineWidth=2;
-    ctx.strokeRect(c.width*0.15,c.height*0.1,c.width*0.7,c.height*0.75);
-    ctx.fillStyle="#f87171"; ctx.font="11px monospace";
-    ctx.fillText(`HANDHELD  shake: ${Math.round(Math.abs(shakeX+shakeY))}px`,c.width*0.15+8,c.height*0.1+16);
-  }},
-  { label:"Zoom", note:"Optical zoom: lens focal length changes. Subject magnifies but perspective STAYS SAME (no parallax shift). Contrast with dolly: different spatial effect.", animate:(c,t)=>{
-    const ctx=c.getContext("2d"); ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,0,c.width,c.height);
-    const zoom=1+Math.sin(t*0.5)*0.4;
-    const cx=c.width/2, cy=c.height/2;
-    // Scene stays in fixed perspective
-    ctx.save(); ctx.translate(cx,cy); ctx.scale(zoom,zoom); ctx.translate(-cx,-cy);
-    ctx.fillStyle="#1a2f44"; ctx.fillRect(160,60,160,180);
-    ctx.fillStyle="#3d2b1f"; ctx.fillRect(60,140,80,100);
-    ctx.fillStyle="#2d5a1b"; ctx.beginPath();ctx.arc(380,160,40,0,Math.PI*2);ctx.fill();
-    ctx.restore();
-    ctx.strokeStyle="#f59e0b"; ctx.lineWidth=2;
-    const fw=c.width/zoom, fh=c.height/zoom;
-    ctx.strokeRect((c.width-fw)/2,(c.height-fh)/2,fw,fh);
-    ctx.fillStyle="#f59e0b"; ctx.font="11px monospace";
-    ctx.fillText(`ZOOM  ×${zoom.toFixed(2)}  (perspective unchanged)`,20,20);
-  }},
+const MOVES = [
+  { key:"pan", label:"Pan", color:"#f59e0b", note:"Rotation around the camera's vertical axis — the camera stays put and turns. Reveals space or follows action. Being a rotation, it produces almost no parallax." },
+  { key:"tilt", label:"Tilt", color:"#60a5fa", note:"Rotation around the horizontal axis — the camera looks up or down from a fixed position. Establishes height and scale." },
+  { key:"track", label:"Track / Truck", color:"#34d399", note:"The camera physically travels sideways (dolly/slider). Watch the PARALLAX: near objects slide past faster than far ones — the true signature of a translational move." },
+  { key:"dolly", label:"Dolly in/out", color:"#34d399", note:"The camera physically moves toward/away from the subject. Near objects grow much faster than the background → the spatial relationship changes. This is NOT a zoom." },
+  { key:"zoom", label:"Zoom", color:"#f472b6", note:"Focal length changes — everything magnifies UNIFORMLY, with NO parallax. Compare with dolly: here the background relationship stays identical. Optical, not physical." },
+  { key:"crane", label:"Crane / Jib", color:"#a78bfa", note:"The camera rises or descends. Near foreground shifts vertically more than the background — parallax again betrays the physical move." },
+  { key:"handheld", label:"Handheld", color:"#f87171", note:"Operator-held: organic, unstable jitter and micro-rotation. Documentary realism, urgency, intimacy (Dogme 95, the Bourne films)." },
 ];
 
+// Per-layer transform for a movement. p = parallax factor (near = larger).
+function moveTransform(move, osc, t, p, W, H){
+  let dx=0, dy=0, rot=0, sc=1;
+  if(move==="pan") dx=osc*W*0.09;               // rotation ≈ uniform shift, ~no parallax
+  else if(move==="tilt") dy=osc*H*0.09;
+  else if(move==="track") dx=osc*W*0.085*p;     // translation → parallax
+  else if(move==="crane") dy=osc*H*0.085*p;
+  else if(move==="dolly") sc=1+osc*0.14*p;      // near scales more → perspective change
+  else if(move==="zoom") sc=1+osc*0.14;         // uniform → no parallax
+  else if(move==="handheld"){ dx=Math.sin(t*7.3)*5+Math.sin(t*13.1)*3; dy=Math.sin(t*5.7)*4+Math.sin(t*11.9)*2; rot=Math.sin(t*4.1)*0.012; }
+  return {dx,dy,rot,sc};
+}
+
 function ModuleCameraMovement() {
-  const [sel, setSel] = useState(0);
+  const [sel, setSel] = useState(3); // dolly — the headline demo
   const canvasRef = useRef();
   const animRef = useRef();
-  const tRef = useRef(0);
+  const M = MOVES[sel];
 
   useEffect(()=>{
     const c=canvasRef.current; if(!c)return;
-    c.width=800; c.height=400;
-    const move=MOVEMENTS[sel];
-    const draw=()=>{
-      tRef.current+=0.016;
-      move.animate(c,tRef.current);
+    c.width=800; c.height=450;
+    const W=c.width, H=c.height, O=1.22;   // overscan hides edges when layers shift
+    const ctx=c.getContext("2d");
+    const move=M.key;
+    const parallax=d=>Math.max(0.04,Math.min(3.2, 5/d));
+    let t0=null;
+    const draw=(now)=>{
+      if(t0===null) t0=now;
+      const t=(now-t0)/1000, osc=Math.sin(t*0.9);
+      ctx.fillStyle="#07090d"; ctx.fillRect(0,0,W,H);
+      SCENE_LAYERS.forEach(l=>{
+        const {dx,dy,rot,sc}=moveTransform(move,osc,t,parallax(l.depth),W,H);
+        ctx.save();
+        ctx.translate(W/2+dx, H/2+dy); ctx.rotate(rot); ctx.scale(O*sc,O*sc); ctx.translate(-W/2,-H/2);
+        l.draw(ctx,W,H);
+        ctx.restore();
+      });
+      ctx.fillStyle="rgba(0,0,0,0.65)"; ctx.fillRect(0,0,W,26);
+      ctx.fillStyle=M.color; ctx.font="bold 13px monospace";
+      const tag = move==="dolly"?"DOLLY — background relationship CHANGES (parallax)":move==="zoom"?"ZOOM — uniform magnify, NO parallax":M.label.toUpperCase();
+      ctx.fillText(tag,12,18);
       animRef.current=requestAnimationFrame(draw);
     };
     animRef.current=requestAnimationFrame(draw);
@@ -1778,17 +1697,17 @@ function ModuleCameraMovement() {
   return (
     <div>
       <InfoBox>
-        Camera movements are a primary tool of visual storytelling. <strong>Rotational movements</strong> (pan, tilt) keep the camera in place and rotate it. <strong>Translational movements</strong> (dolly/track, crane) physically move the camera through space — changing perspective relationships between subjects and background. <strong>The zoom is NOT a camera movement</strong> — it changes focal length, which magnifies the image but does not create parallax. The <em>Hitchcock dolly-zoom</em> (Vertigo effect) combines both simultaneously in opposition to create a dreamlike spatial distortion. Handheld and Steadicam are mounting-defined movements with distinct aesthetic signatures.
+        Camera movements are a primary tool of visual storytelling — and all act on the <strong>same scene</strong> here so you can compare them. <strong>Rotations</strong> (pan, tilt) keep the camera in place and turn it. <strong>Translations</strong> (track, dolly, crane) physically move the camera through space, so nearer objects shift more than distant ones — <strong>parallax</strong> is the tell. <strong>Zoom is NOT a camera movement</strong>: it changes focal length and magnifies everything uniformly, with no parallax. Compare <em>Dolly</em> and <em>Zoom</em> back-to-back — the background relationship changes on the dolly and stays fixed on the zoom. Combining both in opposition gives the <em>Hitchcock dolly-zoom</em> (Vertigo effect).
       </InfoBox>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-        {MOVEMENTS.map((m,i)=>(
-          <button key={m.label} onClick={()=>{setSel(i);tRef.current=0;}} style={i===sel?styles.btnActive:styles.btnChip}>{m.label}</button>
+        {MOVES.map((m,i)=>(
+          <button key={m.key} onClick={()=>setSel(i)} style={i===sel?styles.btnActive:styles.btnChip}>{m.label}</button>
         ))}
       </div>
       <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
-      <p style={styles.noteText}>📌 {MOVEMENTS[sel].note}</p>
+      <p style={styles.noteText}>📌 {M.note}</p>
     </div>
   );
 }
