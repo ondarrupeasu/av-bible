@@ -17,6 +17,7 @@ const STRINGS = {
       color: "Color Science",
       defects: "Artifacts & Defects",
       narrative: "Narrative & Camera",
+      scopes: "Monitoring & Scopes",
     },
     modules: {
       aspectRatio: { title: "Aspect Ratio", desc: "Explore how different ratios frame the world" },
@@ -38,7 +39,7 @@ const STRINGS = {
       shotTypes: { title: "Shot Types", desc: "ECU to EWS — the visual language of framing" },
       cameraMovement: { title: "Camera Movement", desc: "Pan, tilt, track, zoom — motion vocabulary" },
       timecode: { title: "Timecode", desc: "SMPTE timecode — the language of synchronisation" },
-      histogram: { title: "Histogram & Waveform", desc: "Reading exposure and luminance distribution" },
+      scopes: { title: "Scopes", desc: "Histogram, Waveform, Vectorscope & Parade — with live grading" },
     },
   },
 };
@@ -67,7 +68,11 @@ const CATEGORIES = [
   },
   {
     id: "narrative", label: T.categories.narrative,
-    modules: ["shotTypes","cameraMovement","timecode","histogram"],
+    modules: ["shotTypes","cameraMovement","timecode"],
+  },
+  {
+    id: "scopes", label: T.categories.scopes,
+    modules: ["scopes"],
   },
 ];
 
@@ -1739,107 +1744,208 @@ function ModuleTimecode() {
 }
 
 // ─────────────────────────────────────────────
-// MODULE: Histogram
+// MODULE: Scopes (Histogram / Waveform / Vectorscope / Parade)
 // ─────────────────────────────────────────────
-function ModuleHistogram({ image }) {
-  const [showWaveform, setShowWaveform] = useState(false);
-  const canvasRef = useRef();
-  const histRef = useRef();
+// Rec.709 luma + YCbCr for the vectorscope graticule
+const luma709 = (r,g,b) => 0.2126*r+0.7152*g+0.0722*b;
+const toCbCr = (r,g,b) => ([          // r,g,b in 0..1 → Cb,Cr in -0.5..0.5
+  -0.168736*r-0.331264*g+0.5*b,
+   0.5*r-0.418688*g-0.081312*b,
+]);
+
+function drawScope(sc, d, IW, IH, type){
+  const ctx=sc.getContext("2d");
+  const BG="#07090d";
+  if(type==="histogram"){
+    const SW=512, SH=300; sc.width=SW; sc.height=SH;
+    const rH=new Float32Array(256),gH=new Float32Array(256),bH=new Float32Array(256),lH=new Float32Array(256);
+    for(let i=0;i<d.length;i+=4){
+      rH[d[i]]++; gH[d[i+1]]++; bH[d[i+2]]++;
+      lH[Math.round(luma709(d[i],d[i+1],d[i+2]))]++;
+    }
+    ctx.fillStyle=BG; ctx.fillRect(0,0,SW,SH);
+    ctx.strokeStyle="rgba(255,255,255,0.05)"; ctx.lineWidth=1;
+    for(let p=0;p<=4;p++){ const x=(p/4)*SW; ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,SH-16);ctx.stroke(); }
+    const mx=Math.max(...rH,...gH,...bH,...lH)||1;
+    const plot=(H,color)=>{
+      ctx.strokeStyle=color; ctx.lineWidth=1.2; ctx.beginPath();
+      for(let i=0;i<256;i++){ const x=i/255*SW, y=(SH-16)-(H[i]/mx)*(SH-26); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+      ctx.stroke();
+    };
+    plot(lH,"rgba(255,255,255,0.55)"); plot(rH,"rgba(239,68,68,0.85)");
+    plot(gH,"rgba(34,197,94,0.85)"); plot(bH,"rgba(59,130,246,0.85)");
+    ctx.fillStyle="#374151"; ctx.font="10px monospace";
+    ctx.fillText("Blacks",4,SH-4); ctx.fillText("Mid",SW/2-12,SH-4); ctx.fillText("Whites",SW-48,SH-4);
+    return;
+  }
+  if(type==="waveform"||type==="parade"){
+    const SW=540, SH=300; sc.width=SW; sc.height=SH;
+    const parade=type==="parade";
+    const panels=parade?3:1;
+    const gutter=parade?8:0;
+    const pw=(SW-(panels-1)*gutter)/panels;
+    const acc=new Float32Array(SW*SH);
+    const chColor=parade?[[239,68,68],[34,197,94],[59,130,246]]:[[120,230,150]];
+    // accumulate: x maps within each panel, value height inverted
+    for(let y=0;y<IH;y++){
+      for(let x=0;x<IW;x++){
+        const i=(y*IW+x)*4;
+        for(let p=0;p<panels;p++){
+          const val=parade? d[i+p]/255 : luma709(d[i],d[i+1],d[i+2])/255;
+          const px=Math.round(p*(pw+gutter) + (x/IW)*pw);
+          const py=Math.round((SH-14) - val*(SH-24));
+          if(px>=0&&px<SW&&py>=0&&py<SH) acc[py*SW+px]++;
+        }
+      }
+    }
+    const out=ctx.createImageData(SW,SH); const od=out.data;
+    for(let k=0;k<od.length;k+=4){ od[k]=7;od[k+1]=9;od[k+2]=13;od[k+3]=255; }
+    let mx=0; for(let k=0;k<acc.length;k++) if(acc[k]>mx)mx=acc[k];
+    const norm=mx*0.18+1e-6;
+    for(let k=0;k<acc.length;k++){
+      if(acc[k]<=0) continue;
+      const px=k%SW; const p=parade?Math.min(2,Math.floor(px/(pw+gutter))):0;
+      const c=chColor[p]; const t=Math.min(1,acc[k]/norm);
+      od[k*4]=Math.min(255,od[k*4]+c[0]*t);
+      od[k*4+1]=Math.min(255,od[k*4+1]+c[1]*t);
+      od[k*4+2]=Math.min(255,od[k*4+2]+c[2]*t);
+    }
+    ctx.putImageData(out,0,0);
+    // IRE guides on top
+    ctx.strokeStyle="rgba(255,255,255,0.06)"; ctx.fillStyle="#374151"; ctx.font="9px monospace"; ctx.lineWidth=1;
+    for(let p=0;p<=100;p+=25){ const y=(SH-14)-(p/100)*(SH-24); ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(SW,y);ctx.stroke(); ctx.fillText(p+"",2,y-2); }
+    if(parade){ ["R","G","B"].forEach((n,p)=>{ ctx.fillStyle=`rgb(${chColor[p].join(",")})`; ctx.fillText(n,p*(pw+gutter)+4,12); }); }
+    return;
+  }
+  if(type==="vectorscope"){
+    const SW=320, SH=320; sc.width=SW; sc.height=SH;
+    const cx=SW/2, cy=SH/2, scale=SH*0.92; // Cb,Cr ±0.5 → radius
+    const acc=new Float32Array(SW*SH);
+    for(let i=0;i<d.length;i+=4){
+      const [cb,cr]=toCbCr(d[i]/255,d[i+1]/255,d[i+2]/255);
+      const px=Math.round(cx+cb*scale), py=Math.round(cy-cr*scale);
+      if(px>=0&&px<SW&&py>=0&&py<SH) acc[py*SW+px]++;
+    }
+    const out=ctx.createImageData(SW,SH); const od=out.data;
+    for(let k=0;k<od.length;k+=4){ od[k]=7;od[k+1]=9;od[k+2]=13;od[k+3]=255; }
+    let mx=0; for(let k=0;k<acc.length;k++) if(acc[k]>mx)mx=acc[k];
+    const norm=mx*0.12+1e-6;
+    for(let k=0;k<acc.length;k++){ if(acc[k]<=0)continue; const t=Math.min(1,acc[k]/norm);
+      od[k*4+1]=Math.min(255,od[k*4+1]+210*t); od[k*4]=Math.min(255,od[k*4]+40*t); }
+    ctx.putImageData(out,0,0);
+    // graticule
+    ctx.strokeStyle="rgba(255,255,255,0.12)"; ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(cx,cy,scale*0.5,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(cx-scale*0.5,cy);ctx.lineTo(cx+scale*0.5,cy);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(cx,cy-scale*0.5);ctx.lineTo(cx,cy+scale*0.5);ctx.stroke();
+    // 75% colour targets
+    const targets=[["R",[0.75,0,0]],["Yl",[0.75,0.75,0]],["G",[0,0.75,0]],["Cy",[0,0.75,0.75]],["B",[0,0,0.75]],["Mg",[0.75,0,0.75]]];
+    targets.forEach(([n,[r,g,b]])=>{
+      const [cb,cr]=toCbCr(r,g,b);
+      const px=cx+cb*scale, py=cy-cr*scale;
+      ctx.strokeStyle="rgba(255,255,255,0.55)"; ctx.strokeRect(px-5,py-5,10,10);
+      ctx.fillStyle="#9ca3af"; ctx.font="9px monospace"; ctx.fillText(n,px+7,py+3);
+    });
+    // skin-tone line (I-line): direction of a typical skin vector
+    const [scb,scr]=toCbCr(0.86,0.60,0.48);
+    const mag=Math.hypot(scb,scr);
+    ctx.strokeStyle="rgba(245,158,11,0.5)"; ctx.setLineDash([4,3]);
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+scb/mag*scale*0.5,cy-scr/mag*scale*0.5);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle="rgba(245,158,11,0.8)"; ctx.font="9px monospace"; ctx.fillText("skin",cx+scb/mag*scale*0.32+4,cy-scr/mag*scale*0.32);
+    return;
+  }
+}
+
+const SCOPE_TYPES=[["waveform","Waveform"],["histogram","Histogram"],["parade","RGB Parade"],["vectorscope","Vectorscope"]];
+
+function ModuleScopes({ image }) {
+  const [scope, setScope] = useState("waveform");
+  const [lift, setLift] = useState(0);
+  const [gamma, setGamma] = useState(1);
+  const [gain, setGain] = useState(1);
+  const [sat, setSat] = useState(1);
+  const [temp, setTemp] = useState(0);
+  const previewRef = useRef();
+  const scopeRef = useRef();
+  const reset=()=>{setLift(0);setGamma(1);setGain(1);setSat(1);setTemp(0);};
+  const graded = lift!==0||gamma!==1||gain!==1||sat!==1||temp!==0;
+
   useEffect(()=>{
     const img=new Image();
     img.onload=()=>{
-      const c=canvasRef.current; const h=histRef.current;
-      if(!c||!h)return;
-      c.width=Math.min(c.parentElement?.clientWidth-32||840,840);
-      c.height=Math.round(c.width*9/16);
-      const ctx=c.getContext("2d");
-      ctx.drawImage(img,0,0,c.width,c.height);
-      const idata=ctx.getImageData(0,0,c.width,c.height);
+      const pv=previewRef.current, sc=scopeRef.current;
+      if(!pv||!sc) return;
+      const IW=Math.min(pv.parentElement?.clientWidth-32||520,560);
+      const IH=Math.round(IW*9/16);
+      pv.width=IW; pv.height=IH;
+      const pctx=pv.getContext("2d");
+      pctx.drawImage(img,0,0,IW,IH);
+      const idata=pctx.getImageData(0,0,IW,IH);
       const d=idata.data;
-      // Build histogram
-      const r_hist=new Array(256).fill(0);
-      const g_hist=new Array(256).fill(0);
-      const b_hist=new Array(256).fill(0);
-      const luma_hist=new Array(256).fill(0);
+      const tR=1+0.35*temp, tB=1-0.35*temp;
       for(let i=0;i<d.length;i+=4){
-        r_hist[d[i]]++;
-        g_hist[d[i+1]]++;
-        b_hist[d[i+2]]++;
-        const luma=Math.round(0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2]);
-        luma_hist[luma]++;
+        let r=d[i]/255, g=d[i+1]/255, b=d[i+2]/255;
+        r*=tR; b*=tB;                                  // temperature
+        r=Math.pow(Math.min(1,Math.max(0,r*gain+lift)),1/gamma);   // lift/gamma/gain
+        g=Math.pow(Math.min(1,Math.max(0,g*gain+lift)),1/gamma);
+        b=Math.pow(Math.min(1,Math.max(0,b*gain+lift)),1/gamma);
+        const L=luma709(r,g,b);                        // saturation
+        r=L+sat*(r-L); g=L+sat*(g-L); b=L+sat*(b-L);
+        d[i]=Math.max(0,Math.min(255,r*255));
+        d[i+1]=Math.max(0,Math.min(255,g*255));
+        d[i+2]=Math.max(0,Math.min(255,b*255));
       }
-      // Draw histogram
-      h.width=256; h.height=120;
-      const hctx=h.getContext("2d");
-      hctx.fillStyle="#0d1117"; hctx.fillRect(0,0,256,120);
-      const maxVal=Math.max(...luma_hist,...r_hist,...g_hist,...b_hist);
-      const drawHist=(hist,color)=>{
-        hctx.strokeStyle=color; hctx.lineWidth=1;
-        hctx.beginPath();
-        hist.forEach((v,i)=>{
-          const y=120-(v/maxVal)*110;
-          i===0?hctx.moveTo(i,y):hctx.lineTo(i,y);
-        });
-        hctx.stroke();
-      };
-      drawHist(luma_hist,"rgba(255,255,255,0.5)");
-      drawHist(r_hist,"rgba(239,68,68,0.7)");
-      drawHist(g_hist,"rgba(34,197,94,0.7)");
-      drawHist(b_hist,"rgba(59,130,246,0.7)");
-      // Zones
-      hctx.strokeStyle="#1f2937"; hctx.lineWidth=1; hctx.setLineDash([2,2]);
-      [0,128,255].forEach(x=>{
-        hctx.beginPath();hctx.moveTo(x,0);hctx.lineTo(x,120);hctx.stroke();
-      });
-      hctx.setLineDash([]);
-      hctx.fillStyle="#374151"; hctx.font="8px monospace";
-      hctx.fillText("Blacks",2,10); hctx.fillText("Mids",110,10); hctx.fillText("Whites",200,10);
-      // Draw exposure indicator
-      if(!showWaveform){
-        ctx.fillStyle="rgba(0,0,0,0.7)"; ctx.fillRect(0,0,c.width,22);
-        ctx.fillStyle="#9ca3af"; ctx.font="11px monospace";
-        ctx.fillText("Image preview — see histogram below",8,14);
-      } else {
-        // Waveform
-        ctx.globalAlpha=0.6;
-        const wvH=c.height*0.4;
-        ctx.fillStyle="#000"; ctx.fillRect(0,c.height-wvH,c.width,wvH);
-        ctx.globalAlpha=1;
-        for(let x=0;x<c.width;x++){
-          for(let y=0;y<c.height;y++){
-            const pi=(y*c.width+x)*4;
-            const lum=(0.2126*d[pi]+0.7152*d[pi+1]+0.0722*d[pi+2])/255;
-            const wy=c.height-(wvH*lum+10);
-            ctx.fillStyle="rgba(245,158,11,0.15)";
-            ctx.fillRect(x,wy,1,1);
-          }
-        }
-      }
+      pctx.putImageData(idata,0,0);
+      drawScope(sc, d, IW, IH, scope);
     };
     img.src=image;
-  },[image,showWaveform]);
+  },[image,lift,gamma,gain,sat,temp,scope]);
+
+  const sliders=[
+    ["Lift",lift,setLift,-0.2,0.2,0.01,0],
+    ["Gamma",gamma,setGamma,0.4,2.2,0.01,1],
+    ["Gain",gain,setGain,0.4,2,0.01,1],
+    ["Saturation",sat,setSat,0,2,0.01,1],
+    ["Temperature",temp,setTemp,-1,1,0.01,0],
+  ];
+
   return (
     <div>
       <InfoBox>
-        The <strong>histogram</strong> shows the frequency distribution of tonal values across the 0–255 range for each colour channel. A well-exposed image typically shows values spread across the range without clipping at either extreme. The <strong>waveform monitor</strong> (toggle below) maps tonal values vertically against horizontal image position — the professional tool for checking <strong>exposure linearity and clipping across the frame</strong> in broadcast (EBU R 103). The vectorscope (not shown) shows the chrominance distribution in a polar diagram. These tools are more reliable than the camera's LCD for exposure decisions on set.
+        <strong>Scopes</strong> are objective measurement tools — far more reliable than the camera LCD for exposure and colour decisions. The <strong>Histogram</strong> shows the tonal distribution per channel. The <strong>Waveform</strong> maps luminance (vertical, in IRE) against horizontal image position — the standard for checking exposure and clipping across the frame (EBU R 103). The <strong>RGB Parade</strong> splits the waveform into R, G, B side-by-side — the colourist's tool for white balance and channel balance. The <strong>Vectorscope</strong> plots chrominance on a polar diagram: distance from centre = saturation, angle = hue; the boxes are 75% colour targets and the amber line is the <em>skin-tone line</em>. Drag the grading sliders and watch each scope respond in real time.
       </InfoBox>
-      <div style={{display:"flex",gap:8,marginBottom:12}}>
-        <button onClick={()=>setShowWaveform(w=>!w)} style={{...styles.btnSecondary,...(showWaveform?{borderColor:"#f59e0b",color:"#f59e0b"}:{})}}>
-          Waveform: {showWaveform?"ON":"OFF"}
-        </button>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+        {SCOPE_TYPES.map(([k,lbl])=>(
+          <button key={k} onClick={()=>setScope(k)} style={k===scope?styles.btnActive:styles.btnChip}>{lbl}</button>
+        ))}
       </div>
-      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start"}}>
-        <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block"}}>
-          <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start",marginBottom:14}}>
+        <div style={{flex:"1 1 420px",minWidth:280,background:"#111",borderRadius:8,padding:12}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:6}}>GRADED PREVIEW{graded?"":" (neutral)"}</div>
+          <canvas ref={previewRef} style={{display:"block",width:"100%"}}/>
         </div>
-        <div style={{background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:8}}>
-          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:4}}>HISTOGRAM</div>
-          <canvas ref={histRef} style={{display:"block"}}/>
-          <div style={{display:"flex",gap:8,marginTop:4}}>
-            {[["R","#ef4444"],["G","#22c55e"],["B","#3b82f6"],["Luma","#fff"]].map(([n,c])=>(
-              <span key={n} style={{fontSize:10,color:c,fontFamily:"monospace"}}>■ {n}</span>
-            ))}
+        <div style={{flex:"0 1 auto",background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12}}>
+          <div style={{color:"#22d3ee",fontSize:10,fontFamily:"monospace",marginBottom:6,letterSpacing:"0.08em"}}>
+            {SCOPE_TYPES.find(s=>s[0]===scope)[1].toUpperCase()}
           </div>
+          <canvas ref={scopeRef} style={{display:"block",maxWidth:"100%"}}/>
+        </div>
+      </div>
+      <div style={{background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:"12px 16px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+          <span style={{color:"#6b7280",fontSize:11,fontFamily:"monospace",letterSpacing:"0.06em"}}>GRADING</span>
+          <button onClick={reset} style={{...styles.btnSecondary,fontSize:11,padding:"4px 10px"}}>Reset</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
+          {sliders.map(([name,val,setter,min,max,step,def])=>(
+            <label key={name} style={styles.label}>
+              <span>{name}: <strong style={{color:val===def?"#6b7280":"#22d3ee"}}>{(+val).toFixed(2)}</strong></span>
+              <input type="range" min={min} max={max} step={step} value={val}
+                onChange={e=>setter(+e.target.value)}
+                style={{...styles.slider,width:"100%",accentColor:"#22d3ee"}}/>
+            </label>
+          ))}
         </div>
       </div>
     </div>
@@ -1930,12 +2036,12 @@ const MODULE_COMPONENTS = {
   shotTypes: ModuleShotTypes,
   cameraMovement: ModuleCameraMovement,
   timecode: ModuleTimecode,
-  histogram: ModuleHistogram,
+  scopes: ModuleScopes,
 };
 
 const CATEGORY_COLORS = {
   image:"#60a5fa", color:"#f59e0b", defects:"#f87171",
-  optics:"#34d399", narrative:"#a78bfa",
+  optics:"#34d399", narrative:"#a78bfa", scopes:"#22d3ee",
 };
 
 // ─────────────────────────────────────────────
