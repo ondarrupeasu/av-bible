@@ -1870,23 +1870,19 @@ function drawScope(sc, d, IW, IH, type){
   const BG="#07090d";
   if(type==="histogram"){
     const SW=512, SH=300; sc.width=SW; sc.height=SH;
-    const rH=new Float32Array(256),gH=new Float32Array(256),bH=new Float32Array(256),lH=new Float32Array(256);
-    for(let i=0;i<d.length;i+=4){
-      rH[d[i]]++; gH[d[i+1]]++; bH[d[i+2]]++;
-      lH[Math.round(luma709(d[i],d[i+1],d[i+2]))]++;
-    }
+    const lH=new Float32Array(256);
+    for(let i=0;i<d.length;i+=4) lH[Math.round(luma709(d[i],d[i+1],d[i+2]))]++;
     ctx.fillStyle=BG; ctx.fillRect(0,0,SW,SH);
     ctx.strokeStyle="rgba(255,255,255,0.05)"; ctx.lineWidth=1;
     for(let p=0;p<=4;p++){ const x=(p/4)*SW; ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,SH-16);ctx.stroke(); }
-    const mx=Math.max(...rH,...gH,...bH,...lH)||1;
-    const plot=(H,color)=>{
-      ctx.strokeStyle=color; ctx.lineWidth=1.2; ctx.beginPath();
-      for(let i=0;i<256;i++){ const x=i/255*SW, y=(SH-16)-(H[i]/mx)*(SH-26); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
-      ctx.stroke();
-    };
-    plot(lH,"rgba(255,255,255,0.55)"); plot(rH,"rgba(239,68,68,0.85)");
-    plot(gH,"rgba(34,197,94,0.85)"); plot(bH,"rgba(59,130,246,0.85)");
-    ctx.fillStyle="#374151"; ctx.font="10px monospace";
+    const mx=Math.max(...lH)||1;
+    // monochrome luma histogram, filled
+    ctx.beginPath(); ctx.moveTo(0,SH-16);
+    for(let i=0;i<256;i++){ const x=i/255*SW, y=(SH-16)-(lH[i]/mx)*(SH-26); ctx.lineTo(x,y); }
+    ctx.lineTo(SW,SH-16); ctx.closePath();
+    ctx.fillStyle="rgba(226,232,240,0.7)"; ctx.fill();
+    ctx.strokeStyle="rgba(255,255,255,0.9)"; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle="#6b7280"; ctx.font="10px monospace";
     ctx.fillText("Blacks",4,SH-4); ctx.fillText("Mid",SW/2-12,SH-4); ctx.fillText("Whites",SW-48,SH-4);
     return;
   }
@@ -1971,78 +1967,82 @@ function drawScope(sc, d, IW, IH, type){
 
 const SCOPE_TYPES=[["waveform","Waveform"],["histogram","Histogram"],["parade","RGB Parade"],["vectorscope","Vectorscope"]];
 
+// Luma-preserving hue rotation (SVG feColorMatrix), r,g,b in 0..1
+function hueRotateRGB(r,g,b,deg){
+  const a=deg*Math.PI/180, c=Math.cos(a), s=Math.sin(a);
+  return [
+    r*(0.213+c*0.787-s*0.213)+g*(0.715-c*0.715-s*0.715)+b*(0.072-c*0.072+s*0.928),
+    r*(0.213-c*0.213+s*0.143)+g*(0.715+c*0.285+s*0.140)+b*(0.072-c*0.072-s*0.283),
+    r*(0.213-c*0.213-s*0.787)+g*(0.715-c*0.715+s*0.715)+b*(0.072+c*0.928+s*0.072),
+  ];
+}
+
 function ModuleScopes({ image }) {
   const [scope, setScope] = useState("waveform");
   const [lift, setLift] = useState(0);
   const [gamma, setGamma] = useState(1);
   const [gain, setGain] = useState(1);
   const [sat, setSat] = useState(1);
-  const [temp, setTemp] = useState(0);
+  const [hue, setHue] = useState(0);
   const previewRef = useRef();
-  const scopeRef = useRef();
-  const reset=()=>{setLift(0);setGamma(1);setGain(1);setSat(1);setTemp(0);};
-  const graded = lift!==0||gamma!==1||gain!==1||sat!==1||temp!==0;
+  const reset=()=>{setLift(0);setGamma(1);setGain(1);setSat(1);setHue(0);};
 
   useEffect(()=>{
     const img=new Image();
     img.onload=()=>{
-      const pv=previewRef.current, sc=scopeRef.current;
-      if(!pv||!sc) return;
-      const IW=Math.min(pv.parentElement?.clientWidth-32||520,560);
+      const pv=previewRef.current; if(!pv) return;
+      const IW=Math.min(pv.parentElement?.clientWidth-24||640,820);
       const IH=Math.round(IW*9/16);
       pv.width=IW; pv.height=IH;
       const pctx=pv.getContext("2d");
       pctx.drawImage(img,0,0,IW,IH);
-      const idata=pctx.getImageData(0,0,IW,IH);
-      const d=idata.data;
-      const tR=1+0.35*temp, tB=1-0.35*temp;
+      const idata=pctx.getImageData(0,0,IW,IH); const d=idata.data;
       for(let i=0;i<d.length;i+=4){
         let r=d[i]/255, g=d[i+1]/255, b=d[i+2]/255;
-        r*=tR; b*=tB;                                  // temperature
         r=Math.pow(Math.min(1,Math.max(0,r*gain+lift)),1/gamma);   // lift/gamma/gain
         g=Math.pow(Math.min(1,Math.max(0,g*gain+lift)),1/gamma);
         b=Math.pow(Math.min(1,Math.max(0,b*gain+lift)),1/gamma);
-        const L=luma709(r,g,b);                        // saturation
-        r=L+sat*(r-L); g=L+sat*(g-L); b=L+sat*(b-L);
-        d[i]=Math.max(0,Math.min(255,r*255));
-        d[i+1]=Math.max(0,Math.min(255,g*255));
-        d[i+2]=Math.max(0,Math.min(255,b*255));
+        const L=luma709(r,g,b); r=L+sat*(r-L); g=L+sat*(g-L); b=L+sat*(b-L);   // saturation
+        if(hue!==0){ [r,g,b]=hueRotateRGB(r,g,b,hue); }                         // hue rotate
+        d[i]=Math.max(0,Math.min(255,r*255)); d[i+1]=Math.max(0,Math.min(255,g*255)); d[i+2]=Math.max(0,Math.min(255,b*255));
       }
       pctx.putImageData(idata,0,0);
-      drawScope(sc, d, IW, IH, scope);
+      // scope rendered as a PIP overlay in the bottom-left (like a camera monitor)
+      const sc=document.createElement("canvas");
+      drawScope(sc,d,IW,IH,scope);
+      const m=Math.round(IW*0.018);
+      const pipW=Math.round(IW*(scope==="vectorscope"?0.30:0.42));
+      const pipH=Math.round(pipW*sc.height/sc.width);
+      const px=m, py=IH-pipH-m;
+      pctx.fillStyle="rgba(0,0,0,0.5)"; pctx.fillRect(px-3,py-16,pipW+6,pipH+19);
+      pctx.strokeStyle="rgba(34,211,238,0.6)"; pctx.lineWidth=1; pctx.strokeRect(px-2.5,py-15.5,pipW+5,pipH+18);
+      pctx.fillStyle="#22d3ee"; pctx.font="bold 10px monospace"; pctx.fillText(SCOPE_TYPES.find(s=>s[0]===scope)[1].toUpperCase(),px,py-5);
+      pctx.imageSmoothingEnabled=true;
+      pctx.drawImage(sc,px,py,pipW,pipH);
     };
     img.src=image;
-  },[image,lift,gamma,gain,sat,temp,scope]);
+  },[image,lift,gamma,gain,sat,hue,scope]);
 
   const sliders=[
-    ["Lift",lift,setLift,-0.2,0.2,0.01,0],
-    ["Gamma",gamma,setGamma,0.4,2.2,0.01,1],
-    ["Gain",gain,setGain,0.4,2,0.01,1],
-    ["Saturation",sat,setSat,0,2,0.01,1],
-    ["Temperature",temp,setTemp,-1,1,0.01,0],
+    ["Lift",lift,setLift,-0.2,0.2,0.01,0,""],
+    ["Gamma",gamma,setGamma,0.4,2.2,0.01,1,""],
+    ["Gain",gain,setGain,0.4,2,0.01,1,""],
+    ["Saturation",sat,setSat,0,2,0.01,1,""],
+    ["Hue",hue,setHue,-180,180,1,0,"°"],
   ];
 
   return (
     <div>
       <InfoBox>
-        <strong>Scopes</strong> are objective measurement tools — far more reliable than the camera LCD for exposure and colour decisions. The <strong>Histogram</strong> shows the tonal distribution per channel. The <strong>Waveform</strong> maps luminance (vertical, in IRE) against horizontal image position — the standard for checking exposure and clipping across the frame (EBU R 103). The <strong>RGB Parade</strong> splits the waveform into R, G, B side-by-side — the colourist's tool for white balance and channel balance. The <strong>Vectorscope</strong> plots chrominance on a polar diagram: distance from centre = saturation, angle = hue; the boxes are 75% colour targets and the amber line is the <em>skin-tone line</em>. Drag the grading sliders and watch each scope respond in real time.
+        <strong>Scopes</strong> are objective measurement tools — more reliable than the camera LCD for exposure and colour. Pick a scope; it appears as a <strong>picture-in-picture overlay</strong> on the image, the way a camera or monitor shows it. The <strong>Histogram</strong> (monochrome luma) shows the tonal distribution. The <strong>Waveform</strong> maps luminance (IRE) against horizontal position — the standard for exposure and clipping (EBU R 103). The <strong>RGB Parade</strong> splits it into R/G/B for white balance. The <strong>Vectorscope</strong> plots chrominance on a polar diagram (distance = saturation, angle = hue) with 75% targets and the amber skin-tone line. Grade below and watch the scope respond — <em>Hue</em> rotates every colour, so the vectorscope trace spins around the centre.
       </InfoBox>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
         {SCOPE_TYPES.map(([k,lbl])=>(
           <button key={k} onClick={()=>setScope(k)} style={k===scope?styles.btnActive:styles.btnChip}>{lbl}</button>
         ))}
       </div>
-      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start",marginBottom:14}}>
-        <div style={{flex:"1 1 420px",minWidth:280,background:"#111",borderRadius:8,padding:12}}>
-          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:6}}>GRADED PREVIEW{graded?"":" (neutral)"}</div>
-          <canvas ref={previewRef} style={{display:"block",width:"100%"}}/>
-        </div>
-        <div style={{flex:"0 1 auto",background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12}}>
-          <div style={{color:"#22d3ee",fontSize:10,fontFamily:"monospace",marginBottom:6,letterSpacing:"0.08em"}}>
-            {SCOPE_TYPES.find(s=>s[0]===scope)[1].toUpperCase()}
-          </div>
-          <canvas ref={scopeRef} style={{display:"block",maxWidth:"100%"}}/>
-        </div>
+      <div style={{background:"#111",borderRadius:8,padding:12,marginBottom:12,display:"block",maxWidth:"100%"}}>
+        <canvas ref={previewRef} style={{display:"block",width:"100%",borderRadius:4}}/>
       </div>
       <div style={{background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:"12px 16px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
@@ -2050,9 +2050,9 @@ function ModuleScopes({ image }) {
           <button onClick={reset} style={{...styles.btnSecondary,fontSize:11,padding:"4px 10px"}}>Reset</button>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
-          {sliders.map(([name,val,setter,min,max,step,def])=>(
+          {sliders.map(([name,val,setter,min,max,step,def,unit])=>(
             <label key={name} style={styles.label}>
-              <span>{name}: <strong style={{color:val===def?"#6b7280":"#22d3ee"}}>{(+val).toFixed(2)}</strong></span>
+              <span>{name}: <strong style={{color:val===def?"#6b7280":"#22d3ee"}}>{unit==="°"?Math.round(val)+"°":(+val).toFixed(2)}</strong></span>
               <input type="range" min={min} max={max} step={step} value={val}
                 onChange={e=>setter(+e.target.value)}
                 style={{...styles.slider,width:"100%",accentColor:"#22d3ee"}}/>
