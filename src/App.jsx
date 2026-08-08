@@ -1666,25 +1666,19 @@ function ModuleColorTemp() {
 // ─────────────────────────────────────────────
 // MODULE: RAW vs Compressed
 // ─────────────────────────────────────────────
-// Scene-linear test image with real headroom (sky/sun go well above 1.0)
+// Shared scene → scene-linear with headroom (highlights — sky/sun — expanded above 1.0)
 function rawSceneLinear(IW,IH){
+  const c=document.createElement("canvas"); c.width=IW; c.height=IH;
+  drawScene(c.getContext("2d"), IW, IH);
+  const d=c.getContext("2d").getImageData(0,0,IW,IH).data;
   const buf=new Float32Array(IW*IH*3);
-  for(let y=0;y<IH;y++) for(let x=0;x<IW;x++){
-    const p=(y*IW+x)*3, u=x/IW, v=y/IH; let r,g,b;
-    if(v<0.6){ // sky with cloud texture + a bright sun (into the headroom)
-      const base=0.5+(0.6-v)/0.6*2.0;
-      const cloud=0.55+0.45*(0.5+0.5*Math.sin(u*15+v*6))*(0.6+0.4*Math.sin(u*5-v*3));
-      let s=base*cloud;
-      const dd=Math.hypot(u-0.80,(v-0.17)*1.5); s+=Math.max(0,(0.11-dd))/0.11*4.5;
-      r=s*1.03; g=s; b=s*0.86;
-    } else { // ground with texture + a dark and a bright object (shadow/highlight detail)
-      const base=0.10+(v-0.6)/0.4*0.30;
-      const tex=0.8+0.35*Math.sin(u*26)*Math.sin(v*22+u*4);
-      r=base*tex*0.78; g=base*tex*0.92; b=base*tex*0.55;
-      if(Math.hypot(u-0.3,v-0.8)<0.06) { r*=0.25; g*=0.25; b*=0.25; }        // deep shadow
-      if(Math.hypot(u-0.62,v-0.82)<0.05){ r+=2.2; g+=2.2; b+=2.0; }          // specular highlight
-    }
-    buf[p]=Math.max(0,r); buf[p+1]=Math.max(0,g); buf[p+2]=Math.max(0,b);
+  const toLin=v=> v<=0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055,2.4);
+  const sstep=(a,b,x)=>{ const t=Math.max(0,Math.min(1,(x-a)/(b-a))); return t*t*(3-2*t); };
+  for(let p=0,i=0;p<IW*IH;p++,i+=4){
+    const r=toLin(d[i]/255), g=toLin(d[i+1]/255), b=toLin(d[i+2]/255);
+    const lum=0.2126*r+0.7152*g+0.0722*b;
+    const boost=1+sstep(0.5,1.0,lum)*7;   // expand highlights into the RAW headroom
+    buf[p*3]=r*boost; buf[p*3+1]=g*boost; buf[p*3+2]=b*boost;
   }
   return buf;
 }
@@ -2090,7 +2084,23 @@ function ModuleScopes({ image }) {
   const [sat, setSat] = useState(1);
   const [hue, setHue] = useState(0);
   const previewRef = useRef();
+  const pipRef = useRef({x:0.02, y:0.05});   // normalised top-left of the scope PIP — over the sky
+  const frameRef = useRef(null);             // cached graded frame (so dragging doesn't re-grade)
+  const dragRef = useRef(null);
   const reset=()=>{setLift(0);setGamma(1);setGain(1);setSat(1);setHue(0);};
+
+  const drawPip=()=>{
+    const pv=previewRef.current, f=frameRef.current; if(!pv||!f) return;
+    const pctx=pv.getContext("2d");
+    pctx.putImageData(f.idata,0,0);
+    let cx=Math.round(pipRef.current.x*f.IW), cy=Math.round(pipRef.current.y*f.IH);
+    cx=Math.max(4,Math.min(f.IW-f.pipW-4,cx)); cy=Math.max(18,Math.min(f.IH-f.pipH-4,cy));
+    pipRef.current={x:cx/f.IW, y:cy/f.IH};
+    pctx.fillStyle="rgba(0,0,0,0.5)"; pctx.fillRect(cx-3,cy-16,f.pipW+6,f.pipH+19);
+    pctx.strokeStyle="rgba(34,211,238,0.6)"; pctx.lineWidth=1; pctx.strokeRect(cx-2.5,cy-15.5,f.pipW+5,f.pipH+18);
+    pctx.fillStyle="#22d3ee"; pctx.font="bold 10px monospace"; pctx.fillText(SCOPE_TYPES.find(s=>s[0]===scope)[1].toUpperCase()+"  ·  drag",cx,cy-5);
+    pctx.imageSmoothingEnabled=true; pctx.drawImage(f.sc,cx,cy,f.pipW,f.pipH);
+  };
 
   useEffect(()=>{
     const img=new Image();
@@ -2111,22 +2121,18 @@ function ModuleScopes({ image }) {
         if(hue!==0){ [r,g,b]=hueRotateRGB(r,g,b,hue); }                         // hue rotate
         d[i]=Math.max(0,Math.min(255,r*255)); d[i+1]=Math.max(0,Math.min(255,g*255)); d[i+2]=Math.max(0,Math.min(255,b*255));
       }
-      pctx.putImageData(idata,0,0);
-      // scope rendered as a PIP overlay in the bottom-left (like a camera monitor)
-      const sc=document.createElement("canvas");
-      drawScope(sc,d,IW,IH,scope);
-      const m=Math.round(IW*0.018);
-      const pipW=Math.round(IW*(scope==="vectorscope"?0.30:0.42));
-      const pipH=Math.round(pipW*sc.height/sc.width);
-      const px=m, py=IH-pipH-m;
-      pctx.fillStyle="rgba(0,0,0,0.5)"; pctx.fillRect(px-3,py-16,pipW+6,pipH+19);
-      pctx.strokeStyle="rgba(34,211,238,0.6)"; pctx.lineWidth=1; pctx.strokeRect(px-2.5,py-15.5,pipW+5,pipH+18);
-      pctx.fillStyle="#22d3ee"; pctx.font="bold 10px monospace"; pctx.fillText(SCOPE_TYPES.find(s=>s[0]===scope)[1].toUpperCase(),px,py-5);
-      pctx.imageSmoothingEnabled=true;
-      pctx.drawImage(sc,px,py,pipW,pipH);
+      const sc=document.createElement("canvas"); drawScope(sc,d,IW,IH,scope);
+      const pipW=Math.round(IW*(scope==="vectorscope"?0.30:0.42)), pipH=Math.round(pipW*sc.height/sc.width);
+      frameRef.current={idata, sc, IW, IH, pipW, pipH};
+      drawPip();
     };
     img.src=image;
   },[image,lift,gamma,gain,sat,hue,scope]);
+
+  const canvasXY=e=>{ const pv=previewRef.current, r=pv.getBoundingClientRect(); return {x:(e.clientX-r.left)/r.width*pv.width, y:(e.clientY-r.top)/r.height*pv.height}; };
+  const onDown=e=>{ const f=frameRef.current; if(!f)return; const {x,y}=canvasXY(e); const px=pipRef.current.x*f.IW, py=pipRef.current.y*f.IH; if(x>=px-4&&x<=px+f.pipW+4&&y>=py-16&&y<=py+f.pipH) dragRef.current={ox:x-px,oy:y-py}; };
+  const onMove=e=>{ if(!dragRef.current)return; const f=frameRef.current; const {x,y}=canvasXY(e); pipRef.current={x:(x-dragRef.current.ox)/f.IW, y:(y-dragRef.current.oy)/f.IH}; drawPip(); };
+  const onUp=()=>{ dragRef.current=null; };
 
   const sliders=[
     ["Lift",lift,setLift,-0.2,0.2,0.01,0,""],
@@ -2147,7 +2153,8 @@ function ModuleScopes({ image }) {
         ))}
       </div>
       <div style={{background:"#111",borderRadius:8,padding:12,marginBottom:12,display:"block",maxWidth:"100%"}}>
-        <canvas ref={previewRef} style={{display:"block",width:"100%",borderRadius:4}}/>
+        <canvas ref={previewRef} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+          style={{display:"block",width:"100%",borderRadius:4,cursor:"grab"}}/>
       </div>
       <div style={{background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:"12px 16px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
