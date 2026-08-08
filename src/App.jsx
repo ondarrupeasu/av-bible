@@ -173,8 +173,8 @@ function ModuleAspectRatio({ image }) {
     img.onload = () => {
       const c = canvasRef.current; if(!c)return;
       const r = RATIOS[sel];
-      const maxW = Math.min(c.parentElement.clientWidth - 32, 700);
-      const maxH = 360;
+      const maxW = Math.min(c.parentElement.clientWidth - 32, 900);
+      const maxH = 460;
       let cw, ch;
       if(r.w/r.h > maxW/maxH){ cw=maxW; ch=maxW*r.h/r.w; }
       else{ ch=maxH; cw=maxH*r.w/r.h; }
@@ -212,7 +212,7 @@ function ModuleAspectRatio({ image }) {
           </button>
         ))}
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
       <p style={styles.noteText}>📌 {RATIOS[sel].note}</p>
@@ -241,7 +241,7 @@ function ModuleResolution({ image }) {
     const img=new Image();
     img.onload=()=>{
       const c=canvasRef.current; if(!c)return;
-      const maxW=Math.min(c.parentElement?.clientWidth-32||640,640);
+      const maxW=Math.min(c.parentElement?.clientWidth-32||860,860);
       c.width=maxW; c.height=Math.round(maxW*9/16);
       const ctx=c.getContext("2d");
       // draw downscaled version to simulate resolution
@@ -276,7 +276,7 @@ function ModuleResolution({ image }) {
           <button key={r.label} onClick={()=>setSel(i)} style={i===sel?styles.btnActive:styles.btnChip}>{r.label}</button>
         ))}
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%",imageRendering:"pixelated"}}/>
       </div>
       <div style={{...styles.statRow,marginTop:12}}>
@@ -347,7 +347,7 @@ function ModuleChromaSubsampling({ image }) {
     const img=new Image();
     img.onload=()=>{
       const c=canvasRef.current; if(!c)return;
-      const maxW=Math.min(c.parentElement?.clientWidth-32||500,500);
+      const maxW=Math.min(c.parentElement?.clientWidth-32||780,780);
       c.width=maxW; c.height=Math.round(maxW*9/16);
       const ctx=c.getContext("2d");
       const tmp=document.createElement("canvas");
@@ -558,7 +558,10 @@ const GAMUTS = {
 function ModuleColorSpaces() {
   const [active, setActive] = useState(["sRGB / Rec.709","DCI-P3","Rec.2020"]);
   const canvasRef = useRef();
-  const W=320, H=320;
+  const W=480, H=480;
+  // Plot window with room for AP0 (green at y=1.0, blue at y=-0.077) and margins for labels
+  const X0=-0.05, X1=0.80, Y0=-0.10, Y1=1.05;
+  const ML=32, MB=26, MT=14, MR=14;
 
   const toggle=name=>setActive(p=>p.includes(name)?p.filter(x=>x!==name):[...p,name]);
 
@@ -575,7 +578,10 @@ function ModuleColorSpaces() {
     [0.7010,0.1480],[0.7190,0.0806],[0.7346,0.0265],[0.7347,0.0265],
   ];
 
-  const mapXY=(x,y)=>([Math.round(x*W*0.85+W*0.07), Math.round(H-(y*H*0.90+H*0.06))]);
+  const mapXY=(x,y)=>([
+    Math.round(ML + ((x-X0)/(X1-X0))*(W-ML-MR)),
+    Math.round(MT + (1-(y-Y0)/(Y1-Y0))*(H-MT-MB)),
+  ]);
 
   useEffect(()=>{
     const c=canvasRef.current; if(!c)return;
@@ -594,7 +600,8 @@ function ModuleColorSpaces() {
     ctx.lineTo(xl,yl); ctx.closePath();
     ctx.strokeStyle="#374151"; ctx.lineWidth=1.5; ctx.stroke();
     // Spectral color fill approximation
-    const grad=ctx.createLinearGradient(W*0.1,H*0.9,W*0.75,H*0.1);
+    const [gx0,gy0]=mapXY(0.16,0.02); const [gx1,gy1]=mapXY(0.62,0.60);
+    const grad=ctx.createLinearGradient(gx0,gy0,gx1,gy1);
     grad.addColorStop(0,"rgba(100,0,200,0.12)");
     grad.addColorStop(0.15,"rgba(0,0,255,0.12)");
     grad.addColorStop(0.3,"rgba(0,200,200,0.12)");
@@ -626,12 +633,10 @@ function ModuleColorSpaces() {
     });
     // axes
     ctx.fillStyle="#4b5563"; ctx.font="10px monospace";
-    ctx.fillText("x",W-14,H-4); ctx.fillText("y",4,14);
-    for(let v=0;v<=0.8;v+=0.2){
-      const [px]=mapXY(v,0); const [,py]=mapXY(0,v);
-      ctx.fillStyle="#374151";ctx.fillText(v.toFixed(1),px-8,H-2);
-      ctx.fillText(v.toFixed(1),2,py+4);
-    }
+    ctx.fillText("x",W-12,H-4); ctx.fillText("y",4,12);
+    ctx.fillStyle="#374151";
+    for(let v=0;v<=0.8001;v+=0.2){ const [px]=mapXY(v,0); ctx.fillText(v.toFixed(1),px-8,H-4); }
+    for(let v=0;v<=1.0001;v+=0.2){ const [,py]=mapXY(0,v); ctx.fillText(v.toFixed(1),4,py+4); }
   },[active]);
 
   return (
@@ -728,7 +733,7 @@ function ModuleRollingShutter() {
           {running?"⏸ Pause":"▶ Play"}
         </button>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
       <p style={styles.noteText}>📌 At high speeds, the yellow bar visibly leans (skews) due to the sequential line readout. This is rolling shutter. Blue line shows the sensor's current read row.</p>
@@ -790,7 +795,7 @@ function ModuleMoire() {
           {showAA?"AA Filter: ON":"AA Filter: OFF"}
         </button>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
       <p style={styles.noteText}>📌 Move Grid A and B to similar values to see moiré intensify. Enable AA to see how filtering reduces the artifact (at the cost of some sharpness).</p>
@@ -803,31 +808,35 @@ function ModuleMoire() {
 // ─────────────────────────────────────────────
 function ModuleBanding() {
   const [bits, setBits] = useState(10);
+  const [tint, setTint] = useState("sky");
   const canvasRef = useRef();
   useEffect(()=>{
     const c=canvasRef.current; if(!c)return;
-    c.width=480; c.height=200;
+    const W=Math.min(c.parentElement?.clientWidth-32||840,840);
+    c.width=W; c.height=Math.round(W*0.42);
     const ctx=c.getContext("2d");
+    const gradH=c.height-30;
     const steps=Math.pow(2,bits);
-    for(let x=0;x<480;x++){
-      const t=x/480;
-      const quantized=Math.round(t*(steps-1))/(steps-1);
-      const v=Math.round(quantized*255);
-      ctx.fillStyle=`rgb(${v},${v},${v})`;
-      ctx.fillRect(x,0,1,160);
+    // Endpoints per tint — full 0..1 luminance range so quantization steps stay visible
+    const ramps={
+      gray:[[16,16,20],[240,240,245]],
+      sky :[[12,22,46],[150,180,225]],
+      skin:[[40,20,16],[240,205,180]],
+    };
+    const [a,b]=ramps[tint]||ramps.sky;
+    for(let x=0;x<W;x++){
+      const t=x/(W-1);
+      const q=Math.round(t*(steps-1))/(steps-1); // quantize to the chosen bit depth
+      const r=Math.round(a[0]+(b[0]-a[0])*q);
+      const g=Math.round(a[1]+(b[1]-a[1])*q);
+      const bl=Math.round(a[2]+(b[2]-a[2])*q);
+      ctx.fillStyle=`rgb(${r},${g},${bl})`;
+      ctx.fillRect(x,0,1,gradH);
     }
-    // Show banding lines
-    if(bits<=8){
-      ctx.strokeStyle="rgba(245,158,11,0.6)"; ctx.lineWidth=1;
-      for(let s=0;s<steps;s++){
-        const x=Math.round(s/steps*480);
-        ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,160);ctx.stroke();
-      }
-    }
-    ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,160,480,40);
+    ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,gradH,W,30);
     ctx.fillStyle="#9ca3af"; ctx.font="12px monospace";
-    ctx.fillText(`Bit depth: ${bits}-bit  |  ${steps} tonal steps  |  ${bits<=8?"Banding visible":"Smooth gradient"}`,10,182);
-  },[bits]);
+    ctx.fillText(`${bits}-bit  ·  ${steps.toLocaleString()} tonal steps  ·  ${bits<=7?"posterization visible":bits<=9?"subtle steps":"smooth"}`,10,gradH+20);
+  },[bits,tint]);
   return (
     <div>
       <InfoBox>
@@ -843,8 +852,14 @@ function ModuleBanding() {
             <button key={b} onClick={()=>setBits(b)} style={b===bits?styles.btnActive:styles.btnChip}>{b}-bit</button>
           ))}
         </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10,alignItems:"center"}}>
+          <span style={{color:"#6b7280",fontSize:11,fontFamily:"monospace"}}>Gradient:</span>
+          {[["gray","Gray"],["sky","Sky"],["skin","Skin"]].map(([k,lbl])=>(
+            <button key={k} onClick={()=>setTint(k)} style={k===tint?styles.btnActive:styles.btnChip}>{lbl}</button>
+          ))}
+        </div>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
     </div>
@@ -866,7 +881,7 @@ function ModuleNoise({ image }) {
     const img=new Image();
     img.onload=()=>{
       const c=canvasRef.current; if(!c)return;
-      c.width=Math.min(c.parentElement?.clientWidth-32||480,480);
+      c.width=Math.min(c.parentElement?.clientWidth-32||840,840);
       c.height=Math.round(c.width*9/16);
       const ctx=c.getContext("2d");
       ctx.drawImage(img,0,0,c.width,c.height);
@@ -905,7 +920,7 @@ function ModuleNoise({ image }) {
           Chroma noise: {showChroma?"ON":"OFF"}
         </button>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
     </div>
@@ -939,7 +954,7 @@ function ModuleShotTypes({ image }) {
     const img=new Image();
     img.onload=()=>{
       const c=canvasRef.current; if(!c)return;
-      const maxW=Math.min(c.parentElement?.clientWidth-32||500,500);
+      const maxW=Math.min(c.parentElement?.clientWidth-32||780,780);
       c.width=maxW; c.height=Math.round(maxW*9/16);
       const ctx=c.getContext("2d");
       // Draw full image dimmed
@@ -974,7 +989,7 @@ function ModuleShotTypes({ image }) {
           <button key={s.label} onClick={()=>setSel(i)} style={i===sel?styles.btnActive:styles.btnChip}>{s.label}</button>
         ))}
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
       <p style={styles.noteText}>📌 {S.note}</p>
@@ -1154,7 +1169,7 @@ function ModuleDepthOfField() {
         <StatBadge label="Near limit" value={(Dn/1000).toFixed(2)+"m"}/>
         <StatBadge label="Far limit" value={isFinite(Df)&&Df/1000<50?(Df/1000).toFixed(2)+"m":"∞"}/>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
     </div>
@@ -1172,7 +1187,7 @@ function ModuleVignetting({ image }) {
     const img=new Image();
     img.onload=()=>{
       const c=canvasRef.current; if(!c)return;
-      c.width=Math.min(c.parentElement?.clientWidth-32||480,480);
+      c.width=Math.min(c.parentElement?.clientWidth-32||840,840);
       c.height=Math.round(c.width*9/16);
       const ctx=c.getContext("2d");
       ctx.drawImage(img,0,0,c.width,c.height);
@@ -1205,7 +1220,7 @@ function ModuleVignetting({ image }) {
           <input type="range" min={0} max={0.99} step={0.01} value={feather} onChange={e=>setFeather(+e.target.value)} style={styles.slider}/>
         </label>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
     </div>
@@ -1222,7 +1237,7 @@ function ModuleChromaticAberration({ image }) {
     const img=new Image();
     img.onload=()=>{
       const c=canvasRef.current; if(!c)return;
-      c.width=Math.min(c.parentElement?.clientWidth-32||480,480);
+      c.width=Math.min(c.parentElement?.clientWidth-32||840,840);
       c.height=Math.round(c.width*9/16);
       const ctx=c.getContext("2d");
       // Draw R, G, B channels with offset
@@ -1280,7 +1295,7 @@ function ModuleChromaticAberration({ image }) {
           <input type="range" min={0} max={12} step={0.5} value={amount} onChange={e=>setAmount(+e.target.value)} style={styles.slider}/>
         </label>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
     </div>
@@ -1295,48 +1310,58 @@ function ModuleFrameRate() {
   const [playing, setPlaying] = useState(true);
   const canvasRef = useRef();
   const animRef = useRef();
-  const stateRef = useRef({frame:0,lastTime:0});
+  // clock = accumulated real time (ms) of the pendulum motion; samples = last shown frames
+  const stateRef = useRef({clock:0,lastReal:0,nextSample:0,samples:[],frame:0});
 
   useEffect(()=>{
     const c=canvasRef.current; if(!c)return;
-    c.width=480; c.height=200;
+    c.width=800; c.height=340;
     const ctx=c.getContext("2d");
+    const W=c.width, H=c.height;
+    const PERIOD=1600;              // ms per full swing — fixed, independent of fps
+    const AMP=0.95;                 // rad
+    const cx=W/2, cy=54, len=210;
     const interval=1000/fps;
-    let lastDraw=0;
+    const st=stateRef.current;
+    const angleAt=ms=>AMP*Math.sin((ms/PERIOD)*Math.PI*2);
+    const bob=ms=>{const a=angleAt(ms);return [cx+Math.sin(a)*len, cy+Math.cos(a)*len];};
+
     const draw=(now)=>{
-      if(playing && now-lastDraw>=interval){
-        stateRef.current.frame++;
-        lastDraw=now;
-        ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,0,480,200);
-        // Pendulum
-        const f=stateRef.current.frame;
-        const angle=Math.sin(f*0.08)*0.8;
-        const cx=240, cy=30, length=120;
-        const px=cx+Math.sin(angle)*length, py=cy+Math.cos(angle)*length;
-        // Motion blur simulation
-        if(fps<30){
-          const blurSteps=Math.max(1,Math.round(30/fps));
-          for(let b=blurSteps;b>=0;b--){
-            const ba=Math.sin((f-b)*0.08)*0.8;
-            const bx=cx+Math.sin(ba)*length, by=cy+Math.cos(ba)*length;
-            ctx.globalAlpha=(1-b/blurSteps)*0.4;
-            ctx.fillStyle="#f59e0b";
-            ctx.beginPath();ctx.arc(bx,by,16,0,Math.PI*2);ctx.fill();
-          }
-          ctx.globalAlpha=1;
+      if(!st.lastReal) st.lastReal=now;
+      const dt=now-st.lastReal; st.lastReal=now;
+      if(playing){
+        st.clock+=dt;                       // real motion advances at real speed
+        while(st.clock>=st.nextSample){      // emit one displayed frame per 1/fps
+          st.samples.push(st.nextSample);
+          st.frame++;
+          st.nextSample+=interval;
+          if(st.samples.length>8) st.samples.shift();
         }
-        ctx.strokeStyle="#4b5563"; ctx.lineWidth=2;
-        ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(px,py);ctx.stroke();
-        ctx.fillStyle="#f59e0b"; ctx.beginPath();ctx.arc(px,py,16,0,Math.PI*2);ctx.fill();
-        ctx.fillStyle="#1f2937"; ctx.beginPath();ctx.arc(cx,cy,5,0,Math.PI*2);ctx.fill();
-        // Floor
-        ctx.strokeStyle="#1f2937"; ctx.lineWidth=1;
-        ctx.beginPath();ctx.moveTo(0,180);ctx.lineTo(480,180);ctx.stroke();
-        // Frame counter
-        ctx.fillStyle="rgba(0,0,0,0.7)"; ctx.fillRect(0,0,480,26);
-        ctx.fillStyle="#f59e0b"; ctx.font="bold 13px monospace";
-        ctx.fillText(`${fps} fps  |  Frame ${f}  |  Interval: ${(1000/fps).toFixed(1)}ms  |  Motion blur: ${fps<25?"high":fps<50?"medium":"low"}`,10,17);
       }
+      ctx.fillStyle="#0a0a0f"; ctx.fillRect(0,0,W,H);
+      // Floor + pivot
+      ctx.strokeStyle="#1f2937"; ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(0,H-24);ctx.lineTo(W,H-24);ctx.stroke();
+      // Trail of the last shown frames (older = fainter) — this IS the temporal sampling
+      const s=st.samples;
+      for(let i=0;i<s.length-1;i++){
+        const [bx,by]=bob(s[i]);
+        ctx.globalAlpha=0.10+0.10*(i/s.length);
+        ctx.fillStyle="#f59e0b";
+        ctx.beginPath();ctx.arc(bx,by,18,0,Math.PI*2);ctx.fill();
+      }
+      ctx.globalAlpha=1;
+      // Current shown frame (sample-and-hold): rod + bob
+      const cur=s.length?s[s.length-1]:0;
+      const [px,py]=bob(cur);
+      ctx.strokeStyle="#4b5563"; ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(px,py);ctx.stroke();
+      ctx.fillStyle="#f59e0b"; ctx.beginPath();ctx.arc(px,py,18,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle="#1f2937"; ctx.beginPath();ctx.arc(cx,cy,6,0,Math.PI*2);ctx.fill();
+      // Readout
+      ctx.fillStyle="rgba(0,0,0,0.7)"; ctx.fillRect(0,0,W,28);
+      ctx.fillStyle="#f59e0b"; ctx.font="bold 13px monospace";
+      ctx.fillText(`${fps} fps  ·  1 frame every ${interval.toFixed(1)} ms  ·  swing period ${PERIOD} ms (constant)  ·  frame ${st.frame}`,12,18);
       animRef.current=requestAnimationFrame(draw);
     };
     animRef.current=requestAnimationFrame(draw);
@@ -1354,7 +1379,7 @@ function ModuleFrameRate() {
         ))}
         <button onClick={()=>setPlaying(p=>!p)} style={styles.btnSecondary}>{playing?"⏸ Pause":"▶ Play"}</button>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
     </div>
@@ -1438,7 +1463,7 @@ function ModuleRAW({ image }) {
     const img=new Image();
     img.onload=()=>{
       const c=canvasRef.current; if(!c)return;
-      c.width=Math.min(c.parentElement?.clientWidth-32||480,480);
+      c.width=Math.min(c.parentElement?.clientWidth-32||840,840);
       c.height=Math.round(c.width*9/16);
       const ctx=c.getContext("2d");
       ctx.drawImage(img,0,0,c.width,c.height);
@@ -1500,7 +1525,7 @@ function ModuleRAW({ image }) {
           <input type="range" min={-3} max={3} step={0.5} value={exposure} onChange={e=>setExposure(+e.target.value)} style={styles.slider}/>
         </label>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
       <p style={styles.noteText}>📌 At +1.5 EV and above, red zebra stripes show clipped highlights. In RAW mode, those areas retain more recoverable headroom than compressed formats.</p>
@@ -1625,7 +1650,7 @@ function ModuleCameraMovement() {
 
   useEffect(()=>{
     const c=canvasRef.current; if(!c)return;
-    c.width=480; c.height=240;
+    c.width=800; c.height=400;
     const move=MOVEMENTS[sel];
     const draw=()=>{
       tRef.current+=0.016;
@@ -1646,7 +1671,7 @@ function ModuleCameraMovement() {
           <button key={m.label} onClick={()=>{setSel(i);tRef.current=0;}} style={i===sel?styles.btnActive:styles.btnChip}>{m.label}</button>
         ))}
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"inline-block",maxWidth:"100%"}}>
+      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
         <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
       <p style={styles.noteText}>📌 {MOVEMENTS[sel].note}</p>
@@ -1725,7 +1750,7 @@ function ModuleHistogram({ image }) {
     img.onload=()=>{
       const c=canvasRef.current; const h=histRef.current;
       if(!c||!h)return;
-      c.width=Math.min(c.parentElement?.clientWidth-32||480,480);
+      c.width=Math.min(c.parentElement?.clientWidth-32||840,840);
       c.height=Math.round(c.width*9/16);
       const ctx=c.getContext("2d");
       ctx.drawImage(img,0,0,c.width,c.height);
@@ -2030,7 +2055,7 @@ export default function AVBible() {
 
       {/* Content */}
       {activeModule && ActiveComp ? (
-        <div style={{maxWidth:900,margin:"0 auto",padding:"24px 16px"}}>
+        <div style={{maxWidth:1080,margin:"0 auto",padding:"24px 20px"}}>
           <div style={{marginBottom:16}}>
             <div style={{color:CATEGORY_COLORS[activeCat?.id]||"#f59e0b",fontSize:11,fontFamily:"monospace",fontWeight:"bold",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}}>
               {T.categories[activeCat?.id]}
@@ -2041,7 +2066,7 @@ export default function AVBible() {
           <ActiveComp image={image} userImage={userImage}/>
         </div>
       ) : (
-        <div style={{maxWidth:1100,margin:"0 auto",padding:"24px 16px"}}>
+        <div style={{maxWidth:1280,margin:"0 auto",padding:"24px 20px"}}>
           {/* Hero */}
           {!search && (
             <div style={{
