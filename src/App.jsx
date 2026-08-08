@@ -86,83 +86,125 @@ const SCENE = {
   bodyBox: { x:0.470, y:0.525, w:0.16,  h:0.31 },   // full figure — for MS/LS
 };
 
+function contactShadow(ctx, cx, cy, rx, ry, a){
+  ctx.fillStyle=`rgba(0,0,0,${a})`; ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,7); ctx.fill();
+}
+
 function drawFigure(ctx, cx, feetY, h){
-  const headR=h*0.10, headCY=feetY-h+headR, shoulderY=headCY+headR*1.5, hipY=feetY-h*0.42;
-  ctx.save(); ctx.lineCap="round";
-  ctx.strokeStyle="#26364f"; ctx.lineWidth=h*0.075;               // legs
-  ctx.beginPath(); ctx.moveTo(cx-h*0.04,hipY); ctx.lineTo(cx-h*0.055,feetY); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx+h*0.04,hipY); ctx.lineTo(cx+h*0.055,feetY); ctx.stroke();
-  ctx.strokeStyle="#c0563d"; ctx.lineWidth=h*0.13;                // torso
-  ctx.beginPath(); ctx.moveTo(cx,shoulderY); ctx.lineTo(cx,hipY); ctx.stroke();
-  ctx.strokeStyle="#b04f38"; ctx.lineWidth=h*0.05;                // arms
-  ctx.beginPath(); ctx.moveTo(cx,shoulderY+h*0.02); ctx.lineTo(cx-h*0.10,hipY+h*0.03); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(cx,shoulderY+h*0.02); ctx.lineTo(cx+h*0.10,hipY+h*0.03); ctx.stroke();
-  ctx.fillStyle="#e0a878"; ctx.beginPath(); ctx.arc(cx,headCY,headR,0,7); ctx.fill();   // head
-  ctx.fillStyle="#3a2a1c"; ctx.beginPath(); ctx.arc(cx,headCY-headR*0.2,headR*1.02,Math.PI*1.02,Math.PI*2-0.02); ctx.fill(); // hair
-  // minimal facial features (so close-ups read as a face)
+  const headR=h*0.09, headCY=feetY-h+headR, neckY=headCY+headR*0.72;
+  const shoulderY=headCY+headR*1.9, hipY=feetY-h*0.46;
+  ctx.save();
+  contactShadow(ctx,cx,feetY,h*0.13,h*0.026,0.20);
+  // trousers (tapered)
+  ctx.fillStyle="#2b3750";
+  ctx.beginPath(); ctx.moveTo(cx-h*0.068,hipY); ctx.lineTo(cx-h*0.006,hipY); ctx.lineTo(cx-h*0.018,feetY); ctx.lineTo(cx-h*0.078,feetY); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx+h*0.006,hipY); ctx.lineTo(cx+h*0.068,hipY); ctx.lineTo(cx+h*0.078,feetY); ctx.lineTo(cx+h*0.018,feetY); ctx.closePath(); ctx.fill();
+  // coat / torso (tapered trapezoid + rounded shoulders)
+  ctx.fillStyle="#a4523f";
+  ctx.beginPath();
+  ctx.moveTo(cx-h*0.092,shoulderY); ctx.lineTo(cx+h*0.092,shoulderY);
+  ctx.lineTo(cx+h*0.072,hipY+h*0.01); ctx.lineTo(cx-h*0.072,hipY+h*0.01); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx,shoulderY,h*0.092,h*0.03,0,Math.PI,0); ctx.fill();
+  // shaded left half (key light from upper-right)
+  ctx.fillStyle="rgba(0,0,0,0.13)";
+  ctx.beginPath(); ctx.moveTo(cx,shoulderY-h*0.012); ctx.lineTo(cx-h*0.092,shoulderY); ctx.lineTo(cx-h*0.072,hipY+h*0.01); ctx.lineTo(cx,hipY+h*0.01); ctx.closePath(); ctx.fill();
+  // neck
+  ctx.fillStyle="#c4895a"; ctx.fillRect(cx-h*0.02,neckY,h*0.04,headR*1.05);
+  // head with soft form shading
+  const hg=ctx.createRadialGradient(cx+headR*0.35,headCY-headR*0.35,headR*0.15,cx,headCY,headR*1.15);
+  hg.addColorStop(0,"#ecbb8b"); hg.addColorStop(1,"#bd825a");
+  ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(cx,headCY,headR,0,7); ctx.fill();
+  // hair
+  ctx.fillStyle="#3b2b1d"; ctx.beginPath(); ctx.arc(cx,headCY-headR*0.14,headR*0.98,Math.PI*1.05,Math.PI*2-0.05); ctx.fill();
+  // features (subtle, adult — read at close-ups)
   ctx.fillStyle="#2b2018";
-  ctx.beginPath(); ctx.arc(cx-headR*0.34,headCY-headR*0.05,headR*0.13,0,7); ctx.fill();
-  ctx.beginPath(); ctx.arc(cx+headR*0.34,headCY-headR*0.05,headR*0.13,0,7); ctx.fill();
-  ctx.strokeStyle="#b07a52"; ctx.lineWidth=headR*0.08; ctx.lineCap="round";
-  ctx.beginPath(); ctx.moveTo(cx,headCY-headR*0.02); ctx.lineTo(cx,headCY+headR*0.28); ctx.stroke(); // nose
-  ctx.strokeStyle="#9a5a48"; ctx.lineWidth=headR*0.1;
-  ctx.beginPath(); ctx.arc(cx,headCY+headR*0.4,headR*0.3,0.2,Math.PI-0.2); ctx.stroke(); // mouth
+  ctx.beginPath(); ctx.arc(cx-headR*0.3,headCY-headR*0.02,headR*0.09,0,7); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx+headR*0.3,headCY-headR*0.02,headR*0.09,0,7); ctx.fill();
+  ctx.strokeStyle="rgba(120,80,55,0.55)"; ctx.lineWidth=headR*0.06; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(cx,headCY+headR*0.02); ctx.lineTo(cx+headR*0.06,headCY+headR*0.26); ctx.stroke();
+  ctx.strokeStyle="rgba(150,80,65,0.6)"; ctx.lineWidth=headR*0.07;
+  ctx.beginPath(); ctx.moveTo(cx-headR*0.2,headCY+headR*0.5); ctx.lineTo(cx+headR*0.22,headCY+headR*0.48); ctx.stroke();
   ctx.restore();
 }
 
-// Draws the shared scene to fill (0,0,W,H). All positions are normalised.
-function drawScene(ctx, W, H){
-  const horizon=H*0.60;
-  const sky=ctx.createLinearGradient(0,0,0,horizon);
-  sky.addColorStop(0,"#2f5488"); sky.addColorStop(0.7,"#7ea6cf"); sky.addColorStop(1,"#c3d8ec");
-  ctx.fillStyle=sky; ctx.fillRect(0,0,W,horizon);
-  // Sun + glow
-  const sunX=W*0.80, sunY=H*0.15, sunR=H*0.05;
-  const glow=ctx.createRadialGradient(sunX,sunY,sunR*0.3,sunX,sunY,sunR*4.5);
-  glow.addColorStop(0,"rgba(255,247,214,0.95)"); glow.addColorStop(0.25,"rgba(255,226,150,0.5)"); glow.addColorStop(1,"rgba(255,220,150,0)");
-  ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(sunX,sunY,sunR*4.5,0,7); ctx.fill();
-  ctx.fillStyle="#fff7d6"; ctx.beginPath(); ctx.arc(sunX,sunY,sunR,0,7); ctx.fill();
-  // Far mountains (atmospheric haze)
-  ctx.fillStyle="#8aa0bd";
-  ctx.beginPath(); ctx.moveTo(0,horizon);
-  [[0,0.52],[0.15,0.44],[0.30,0.50],[0.46,0.42],[0.62,0.49],[0.80,0.45],[1,0.51]].forEach(([x,y])=>ctx.lineTo(x*W,y*H));
-  ctx.lineTo(W,horizon); ctx.closePath(); ctx.fill();
-  // Mid hills
-  ctx.fillStyle="#3d6b43";
-  ctx.beginPath(); ctx.moveTo(0,horizon);
-  [[0,0.585],[0.25,0.55],[0.5,0.585],[0.75,0.55],[1,0.585]].forEach(([x,y])=>ctx.lineTo(x*W,y*H));
-  ctx.lineTo(W,horizon); ctx.closePath(); ctx.fill();
-  // Ground
-  const gnd=ctx.createLinearGradient(0,horizon,0,H);
-  gnd.addColorStop(0,"#4e7d38"); gnd.addColorStop(1,"#2c4d1e");
-  ctx.fillStyle=gnd; ctx.fillRect(0,horizon,W,H-horizon);
-  // Road (perspective)
-  const vpX=W*0.46;
-  ctx.fillStyle="#6d6d73";
-  ctx.beginPath(); ctx.moveTo(vpX-1,horizon); ctx.lineTo(vpX+1,horizon); ctx.lineTo(W*0.66,H); ctx.lineTo(W*0.30,H); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle="rgba(242,242,230,0.8)"; ctx.lineWidth=Math.max(1,W*0.004); ctx.setLineDash([H*0.05,H*0.045]);
-  ctx.beginPath(); ctx.moveTo(vpX,horizon); ctx.lineTo(W*0.48,H); ctx.stroke(); ctx.setLineDash([]);
-  // House (left)
-  const hx=W*0.06, hy=H*0.44, hw=W*0.15, hh=H*0.18;
-  ctx.fillStyle="#8a5a3c"; ctx.fillRect(hx,hy,hw,hh);
-  ctx.fillStyle="#6b3f28"; ctx.beginPath(); ctx.moveTo(hx-hw*0.08,hy); ctx.lineTo(hx+hw*0.5,hy-hh*0.5); ctx.lineTo(hx+hw*1.08,hy); ctx.closePath(); ctx.fill();
-  ctx.fillStyle="#ffd98a"; ctx.fillRect(hx+hw*0.12,hy+hh*0.24,hw*0.22,hh*0.28); ctx.fillRect(hx+hw*0.66,hy+hh*0.24,hw*0.22,hh*0.28);
-  ctx.fillStyle="#4a2f1e"; ctx.fillRect(hx+hw*0.42,hy+hh*0.5,hw*0.18,hh*0.5);
-  // Background trees
-  const bgTree=(x,y,s)=>{ ctx.fillStyle="#5a3a1e"; ctx.fillRect(x-s*0.15,y,s*0.3,s*1.3); ctx.fillStyle="#2f5a2a"; ctx.beginPath();ctx.arc(x,y,s,0,7);ctx.fill(); };
-  bgTree(W*0.665,horizon-H*0.018,H*0.022); bgTree(W*0.72,horizon-H*0.008,H*0.017); bgTree(W*0.90,horizon-H*0.02,H*0.03);
-  // Midground tree
-  const mtX=W*0.26, mtY=H*0.66, mtR=H*0.075;
-  ctx.fillStyle="#3f2a17"; ctx.fillRect(mtX-mtR*0.12,mtY,mtR*0.24,mtR*1.7);
-  ctx.fillStyle="#2f6b2e"; [[0,0],[-0.6,0.12],[0.6,0.16],[0,-0.5]].forEach(([dx,dy])=>{ctx.beginPath();ctx.arc(mtX+dx*mtR,mtY+dy*mtR,mtR*0.72,0,7);ctx.fill();});
-  // Subject (person) — SCENE.bodyBox / faceBox track this
-  drawFigure(ctx, W*0.55, H*0.82, H*0.28);
-  // Foreground bush (near, bottom-left → depth cue)
-  ctx.fillStyle="#25451c"; [[0,0],[0.5,0.08],[-0.5,0.1],[0.25,-0.4]].forEach(([dx,dy])=>{ctx.beginPath();ctx.arc(W*0.10+dx*W*0.07,H*0.97+dy*H*0.12,W*0.065,0,7);ctx.fill();});
-  // Foreground fence post (near, bottom-right)
-  ctx.fillStyle="#5a4632"; ctx.fillRect(W*0.865,H*0.70,W*0.02,H*0.30);
-  ctx.fillStyle="#6b543c"; ctx.fillRect(W*0.845,H*0.74,W*0.06,H*0.02);
-}
+// ── Shared scene as depth-sorted layers (far → near) ─────────────
+// depth = arbitrary "metres" for DoF; nearer layers get more parallax on dolly.
+const SCENE_LAYERS = [
+  { name:"sky", depth:600, draw:(ctx,W,H)=>{
+    const horizon=H*0.60;
+    const sky=ctx.createLinearGradient(0,0,0,horizon);
+    sky.addColorStop(0,"#3a5f7d"); sky.addColorStop(0.65,"#8aa8bc"); sky.addColorStop(1,"#c7d6d9");
+    ctx.fillStyle=sky; ctx.fillRect(0,0,W,horizon);
+    const sunX=W*0.80, sunY=H*0.16, sunR=H*0.045;
+    const glow=ctx.createRadialGradient(sunX,sunY,sunR*0.3,sunX,sunY,sunR*5);
+    glow.addColorStop(0,"rgba(255,244,214,0.9)"); glow.addColorStop(0.25,"rgba(255,224,160,0.4)"); glow.addColorStop(1,"rgba(255,220,160,0)");
+    ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(sunX,sunY,sunR*5,0,7); ctx.fill();
+    ctx.fillStyle="#fdf3d4"; ctx.beginPath(); ctx.arc(sunX,sunY,sunR,0,7); ctx.fill();
+  }},
+  { name:"mountains", depth:300, draw:(ctx,W,H)=>{   // atmospheric haze — desaturated, light
+    const horizon=H*0.60;
+    ctx.fillStyle="#9fb0c0";
+    ctx.beginPath(); ctx.moveTo(0,horizon);
+    [[0,0.52],[0.15,0.45],[0.30,0.50],[0.46,0.43],[0.62,0.49],[0.80,0.46],[1,0.51]].forEach(([x,y])=>ctx.lineTo(x*W,y*H));
+    ctx.lineTo(W,horizon); ctx.closePath(); ctx.fill();
+  }},
+  { name:"hills", depth:110, draw:(ctx,W,H)=>{
+    const horizon=H*0.60;
+    ctx.fillStyle="#6a8468";
+    ctx.beginPath(); ctx.moveTo(0,horizon);
+    [[0,0.585],[0.25,0.555],[0.5,0.585],[0.75,0.555],[1,0.585]].forEach(([x,y])=>ctx.lineTo(x*W,y*H));
+    ctx.lineTo(W,horizon); ctx.closePath(); ctx.fill();
+  }},
+  { name:"ground", depth:30, draw:(ctx,W,H)=>{
+    const horizon=H*0.60;
+    const gnd=ctx.createLinearGradient(0,horizon,0,H);
+    gnd.addColorStop(0,"#5a7048"); gnd.addColorStop(1,"#33452a");
+    ctx.fillStyle=gnd; ctx.fillRect(0,horizon,W,H-horizon);
+    // road (perspective)
+    const vpX=W*0.46;
+    const rg=ctx.createLinearGradient(0,horizon,0,H);
+    rg.addColorStop(0,"#5f6167"); rg.addColorStop(1,"#7a7c82");
+    ctx.fillStyle=rg;
+    ctx.beginPath(); ctx.moveTo(vpX-1,horizon); ctx.lineTo(vpX+1,horizon); ctx.lineTo(W*0.66,H); ctx.lineTo(W*0.30,H); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle="rgba(238,236,222,0.75)"; ctx.lineWidth=Math.max(1,W*0.004); ctx.setLineDash([H*0.05,H*0.045]);
+    ctx.beginPath(); ctx.moveTo(vpX,horizon); ctx.lineTo(W*0.48,H); ctx.stroke(); ctx.setLineDash([]);
+  }},
+  { name:"house", depth:20, draw:(ctx,W,H)=>{
+    const horizon=H*0.60;
+    // background trees (hazed)
+    const bgTree=(x,y,s)=>{ ctx.fillStyle="#5a4326"; ctx.fillRect(x-s*0.14,y,s*0.28,s*1.3); ctx.fillStyle="#4a6a48"; ctx.beginPath();ctx.arc(x,y,s,0,7);ctx.fill(); };
+    bgTree(W*0.665,horizon-H*0.016,H*0.022); bgTree(W*0.72,horizon-H*0.006,H*0.017); bgTree(W*0.90,horizon-H*0.018,H*0.03);
+    const hx=W*0.055, hy=H*0.44, hw=W*0.155, hh=H*0.185;
+    contactShadow(ctx,hx+hw*0.5,hy+hh,hw*0.62,H*0.014,0.22);
+    // walls (subtle vertical shade)
+    const wg=ctx.createLinearGradient(hx,0,hx+hw,0);
+    wg.addColorStop(0,"#8a6144"); wg.addColorStop(1,"#6f4a31");
+    ctx.fillStyle=wg; ctx.fillRect(hx,hy,hw,hh);
+    ctx.fillStyle="#5e3a26"; ctx.beginPath(); ctx.moveTo(hx-hw*0.08,hy); ctx.lineTo(hx+hw*0.5,hy-hh*0.52); ctx.lineTo(hx+hw*1.08,hy); ctx.closePath(); ctx.fill();
+    ctx.fillStyle="#f2cf88"; ctx.fillRect(hx+hw*0.12,hy+hh*0.24,hw*0.2,hh*0.26); ctx.fillRect(hx+hw*0.68,hy+hh*0.24,hw*0.2,hh*0.26);
+    ctx.fillStyle="#43301f"; ctx.fillRect(hx+hw*0.42,hy+hh*0.5,hw*0.16,hh*0.5);
+  }},
+  { name:"midtree", depth:8, draw:(ctx,W,H)=>{
+    const mtX=W*0.26, mtY=H*0.65, mtR=H*0.078;
+    contactShadow(ctx,mtX,mtY+mtR*1.7,mtR*0.9,H*0.016,0.24);
+    ctx.fillStyle="#3a2917"; ctx.fillRect(mtX-mtR*0.11,mtY,mtR*0.22,mtR*1.8);
+    ctx.fillStyle="#3f6a3c"; [[0,0],[-0.6,0.14],[0.6,0.18],[0,-0.52]].forEach(([dx,dy])=>{ctx.beginPath();ctx.arc(mtX+dx*mtR,mtY+dy*mtR,mtR*0.72,0,7);ctx.fill();});
+    ctx.fillStyle="rgba(255,240,200,0.10)"; ctx.beginPath();ctx.arc(mtX+mtR*0.3,mtY-mtR*0.3,mtR*0.55,0,7);ctx.fill(); // sun-side highlight
+  }},
+  { name:"subject", depth:5, draw:(ctx,W,H)=> drawFigure(ctx, W*0.55, H*0.82, H*0.28) },
+  { name:"foreground", depth:1.8, draw:(ctx,W,H)=>{
+    // near bush (bottom-left)
+    ctx.fillStyle="#2c4a22"; [[0,0],[0.5,0.08],[-0.5,0.1],[0.25,-0.4]].forEach(([dx,dy])=>{ctx.beginPath();ctx.arc(W*0.10+dx*W*0.07,H*0.98+dy*H*0.12,W*0.066,0,7);ctx.fill();});
+    ctx.fillStyle="rgba(255,240,200,0.08)"; ctx.beginPath();ctx.arc(W*0.12,H*0.9,W*0.05,0,7);ctx.fill();
+    // near fence post (bottom-right)
+    contactShadow(ctx,W*0.875,H*1.0,W*0.03,H*0.012,0.25);
+    ctx.fillStyle="#4f3d29"; ctx.fillRect(W*0.865,H*0.70,W*0.022,H*0.30);
+    ctx.fillStyle="#5f4a32"; ctx.fillRect(W*0.842,H*0.74,W*0.068,H*0.022);
+  }},
+];
+
+// Composite all layers → the flat shared scene (default image, Shot Types, …)
+function drawScene(ctx, W, H){ SCENE_LAYERS.forEach(l=>l.draw(ctx,W,H)); }
 
 function generateDefaultImageDataURL() {
   const c = document.createElement("canvas");
