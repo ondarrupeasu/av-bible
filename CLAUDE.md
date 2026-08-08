@@ -78,10 +78,16 @@ imprescindible (ver más abajo). Orden acordado con el usuario:
   LC…); **distancias/límites por cable** (HDMI ~15 m, SDI 3G ~100 m coax, fibra km,
   Cat 100 m…); propietario vs abierto. DESTACAR XLR-3 (audio) vs DMX (XLR-5 estándar/
   XLR-3 común, pero es DATOS RS-485, no audio).
-- **Lighting** (categoría nueva): (a) Luz de retrato — modelo + key/fill/back… con
-  sombreado por normales (patrones Rembrandt/mariposa/loop/split, ratio, dura/suave,
-  temperatura por foco); (b) DMX — universo 512ch, direccionamiento, personalidad de
-  fixture, Art-Net/sACN, patch virtual. Fixtures dentro de estos, no módulo aparte.
+- **Lighting** (categoría nueva): (a) Luz de retrato — DECIDIDO enfoque **2.5D con
+  mapa de normales** (NO 3D real/Three.js: rompe "sin librerías" y no hace falta orbitar
+  cámara para enseñar luz). Doble vista: **diagrama cenital** (esquema top-down con
+  marcadores de luz arrastrables: azimut 360°, distancia/caída, altura/elevación, temp,
+  intensidad, dura/suave, etiquetados key/fill/back/rim/kicker) + **render frontal** del
+  busto sombreado en vivo por N·L+especular. Normal map del busto generado por código o
+  bakeado y embebido. Empezar por cabeza/busto (patrones Rembrandt/mariposa/loop/split);
+  plano medio/cuerpo = ampliación. Pega honesta asumida: cámara frontal fija, back/rim
+  simulado por ángulos rasantes. (b) DMX — universo 512ch, direccionamiento, personalidad
+  de fixture, Art-Net/sACN, patch virtual. Fixtures dentro de estos, no módulo aparte.
 - Artefactos que faltan: flicker/bandas rodantes (50/60Hz, PWM LED), distorsión de
   lente (barril/cojín), interlazado/combing, halación/bloom, focus breathing.
 

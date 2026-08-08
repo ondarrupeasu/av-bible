@@ -99,6 +99,14 @@ function drawFigure(ctx, cx, feetY, h){
   ctx.beginPath(); ctx.moveTo(cx,shoulderY+h*0.02); ctx.lineTo(cx+h*0.10,hipY+h*0.03); ctx.stroke();
   ctx.fillStyle="#e0a878"; ctx.beginPath(); ctx.arc(cx,headCY,headR,0,7); ctx.fill();   // head
   ctx.fillStyle="#3a2a1c"; ctx.beginPath(); ctx.arc(cx,headCY-headR*0.2,headR*1.02,Math.PI*1.02,Math.PI*2-0.02); ctx.fill(); // hair
+  // minimal facial features (so close-ups read as a face)
+  ctx.fillStyle="#2b2018";
+  ctx.beginPath(); ctx.arc(cx-headR*0.34,headCY-headR*0.05,headR*0.13,0,7); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx+headR*0.34,headCY-headR*0.05,headR*0.13,0,7); ctx.fill();
+  ctx.strokeStyle="#b07a52"; ctx.lineWidth=headR*0.08; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(cx,headCY-headR*0.02); ctx.lineTo(cx,headCY+headR*0.28); ctx.stroke(); // nose
+  ctx.strokeStyle="#9a5a48"; ctx.lineWidth=headR*0.1;
+  ctx.beginPath(); ctx.arc(cx,headCY+headR*0.4,headR*0.3,0.2,Math.PI-0.2); ctx.stroke(); // mouth
   ctx.restore();
 }
 
@@ -965,68 +973,87 @@ function ModuleNoise({ image }) {
 
 // ─────────────────────────────────────────────
 // MODULE: Shot Types
+// Framings anchored to the shared scene's subject (cx,cy centre + s = size,
+// both normalised; scene is 16:9 so a square-in-normalised crop is 16:9).
 // ─────────────────────────────────────────────
 const SHOTS = [
-  { label:"ECU", name:"Extreme Close-Up", crop:[0.30,0.00,0.40,0.25], note:"Extreme detail: eye, mouth, hand. Maximum emotional intensity. Ingmar Bergman, Sergio Leone." },
-  { label:"BCU", name:"Big Close-Up", crop:[0.20,0.00,0.60,0.35], note:"Face fills frame, chin may be cut. Used in drama for emotional revelation." },
-  { label:"CU", name:"Close-Up", crop:[0.15,0.00,0.70,0.50], note:"Head and shoulders. Standard interview framing. Establishes emotional connection." },
-  { label:"MCU", name:"Medium Close-Up", crop:[0.10,0.00,0.80,0.60], note:"Chest up. American TV standard. Conversational intimacy without losing context." },
-  { label:"MS", name:"Medium Shot", crop:[0.05,0.10,0.90,0.85], note:"Waist up. Allows gesture and body language. Most common in dialogue scenes." },
-  { label:"MLS", name:"Medium Long Shot", crop:[0.02,0.15,0.96,0.95], note:"Knees up. Character + immediate environment. Natural, everyday framing." },
-  { label:"LS", name:"Long Shot", crop:[0.00,0.10,1.00,1.00], note:"Full body with context. Shows character in space. Establishes spatial relationships." },
-  { label:"VLS", name:"Very Long Shot", crop:[0.00,0.00,1.00,1.00], note:"Character recognisable but environment dominant. Scale and isolation." },
-  { label:"EWS", name:"Extreme Wide Shot", crop:[0.00,0.00,1.00,1.00], note:"Establishing shot. Tiny figures in vast landscape. Pure environment statement." },
-  { label:"2S", name:"Two Shot", crop:[0.00,0.05,1.00,0.95], note:"Two characters in frame. Dialogue and relationship dynamics." },
-  { label:"OTS", name:"Over-the-Shoulder", crop:[0.00,0.00,1.00,1.00], note:"Foreground shoulder anchors perspective. Standard for dialogue coverage." },
-  { label:"POV", name:"Point of View", crop:[0.00,0.00,1.00,1.00], note:"Camera as character's eyes. Subjective perspective. Hitchcock's tool." },
+  { label:"ECU", name:"Extreme Close-Up", cx:0.55, cy:0.572, s:0.055, note:"Extreme detail: eye, mouth, hand. Maximum emotional intensity. Ingmar Bergman, Sergio Leone." },
+  { label:"BCU", name:"Big Close-Up", cx:0.55, cy:0.585, s:0.10, note:"Face fills frame, chin may be cut. Used in drama for emotional revelation." },
+  { label:"CU", name:"Close-Up", cx:0.55, cy:0.605, s:0.16, note:"Head and shoulders. Standard interview framing. Establishes emotional connection." },
+  { label:"MCU", name:"Medium Close-Up", cx:0.55, cy:0.635, s:0.235, note:"Chest up. American TV standard. Conversational intimacy without losing context." },
+  { label:"MS", name:"Medium Shot", cx:0.55, cy:0.66, s:0.33, note:"Waist up. Allows gesture and body language. Most common in dialogue scenes." },
+  { label:"MLS", name:"Medium Long Shot", cx:0.548, cy:0.685, s:0.45, note:"Knees up. Character + immediate environment. Natural, everyday framing." },
+  { label:"LS", name:"Long Shot", cx:0.545, cy:0.66, s:0.62, note:"Full body with context. Shows character in space. Establishes spatial relationships." },
+  { label:"VLS", name:"Very Long Shot", cx:0.53, cy:0.60, s:0.82, note:"Character recognisable but environment dominant. Scale and isolation." },
+  { label:"EWS", name:"Extreme Wide Shot", cx:0.50, cy:0.50, s:1.00, note:"Establishing shot. Tiny figure in vast landscape. Pure environment statement." },
 ];
 
-function ModuleShotTypes({ image }) {
-  const [sel, setSel] = useState(2);
-  const canvasRef = useRef();
+function ModuleShotTypes() {
+  const [sel, setSel] = useState(4);
+  const sceneRef = useRef();
+  const frameRef = useRef();
+  const resultRef = useRef();
   const S = SHOTS[sel];
 
   useEffect(()=>{
-    const img=new Image();
-    img.onload=()=>{
-      const c=canvasRef.current; if(!c)return;
-      const maxW=Math.min(c.parentElement?.clientWidth-32||780,780);
-      c.width=maxW; c.height=Math.round(maxW*9/16);
-      const ctx=c.getContext("2d");
-      // Draw full image dimmed
-      ctx.globalAlpha=0.25;
-      ctx.drawImage(img,0,0,c.width,c.height);
-      ctx.globalAlpha=1;
-      // Draw cropped area
-      const [x1,y1,x2,y2]=S.crop;
-      const cropX=x1*img.width, cropY=y1*img.height;
-      const cropW=(x2-x1)*img.width, cropH=(y2-y1)*img.height;
-      const destX=x1*c.width, destY=y1*c.height;
-      const destW=(x2-x1)*c.width, destH=(y2-y1)*c.height;
-      ctx.drawImage(img,cropX,cropY,cropW,cropH,destX,destY,destW,destH);
-      // Crop indicator
-      ctx.strokeStyle="#f59e0b"; ctx.lineWidth=2;
-      ctx.strokeRect(destX,destY,destW,destH);
-      // Label
-      ctx.fillStyle="rgba(0,0,0,0.75)"; ctx.fillRect(0,0,c.width,28);
-      ctx.fillStyle="#f59e0b"; ctx.font="bold 13px monospace";
-      ctx.fillText(`${S.label} — ${S.name}`,10,18);
-    };
-    img.src=image;
-  },[sel,image]);
+    if(!sceneRef.current){
+      const s=document.createElement("canvas"); s.width=960; s.height=540;
+      drawScene(s.getContext("2d"),960,540); sceneRef.current=s;
+    }
+    const scene=sceneRef.current;
+    const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+    const half=S.s/2;
+    const cx=clamp(S.cx,half,1-half), cy=clamp(S.cy,half,1-half);
+    const crop={x:cx-half,y:cy-half,w:S.s,h:S.s};
+
+    // LEFT — full scene with the frame marked
+    const fc=frameRef.current;
+    if(fc){
+      const FW=Math.min(fc.parentElement?.clientWidth-24||640,760);
+      fc.width=FW; fc.height=Math.round(FW*9/16);
+      const fx=fc.getContext("2d");
+      fx.drawImage(scene,0,0,fc.width,fc.height);
+      const rx=crop.x*fc.width, ry=crop.y*fc.height, rw=crop.w*fc.width, rh=crop.h*fc.height;
+      fx.fillStyle="rgba(6,6,9,0.6)";
+      fx.fillRect(0,0,fc.width,ry);
+      fx.fillRect(0,ry+rh,fc.width,fc.height-(ry+rh));
+      fx.fillRect(0,ry,rx,rh);
+      fx.fillRect(rx+rw,ry,fc.width-(rx+rw),rh);
+      fx.strokeStyle="#f59e0b"; fx.lineWidth=2; fx.strokeRect(rx,ry,rw,rh);
+      fx.fillStyle="rgba(0,0,0,0.7)"; fx.fillRect(0,0,fc.width,26);
+      fx.fillStyle="#f59e0b"; fx.font="bold 13px monospace";
+      fx.fillText(`${S.label} — ${S.name}`,10,18);
+    }
+    // RIGHT — the resulting frame
+    const rc=resultRef.current;
+    if(rc){
+      const RW=Math.min(rc.parentElement?.clientWidth-24||340,380);
+      rc.width=RW; rc.height=Math.round(RW*9/16);
+      const rx=rc.getContext("2d");
+      rx.drawImage(scene, crop.x*scene.width, crop.y*scene.height, crop.w*scene.width, crop.h*scene.height, 0,0,rc.width,rc.height);
+      rx.strokeStyle="#1f2937"; rx.lineWidth=1; rx.strokeRect(0.5,0.5,rc.width-1,rc.height-1);
+    }
+  },[sel]);
 
   return (
     <div>
       <InfoBox>
-        Shot types define the <strong>field of view</strong> and the <strong>psychological distance</strong> between the camera and the subject. They are the basic vocabulary of visual language — not mere technical decisions but <em>narrative choices</em>. The International vocabulary of cinematography (ISO 2834) codifies several of these. In multicamera production, the director assigns shot types to each camera in the rundown to ensure coverage variety and editorial rhythm.
+        Shot types define the <strong>field of view</strong> and the <strong>psychological distance</strong> between the camera and the subject — the basic vocabulary of visual language, not mere technical decisions but <em>narrative choices</em>. Here the amber frame on the left shows what each shot captures of the <strong>same staged scene</strong>; the right panel is the resulting image. Note how tighter shots isolate the subject emotionally while wider shots emphasise environment and scale. In multicamera production the director assigns shot types per camera in the rundown to ensure coverage variety and editorial rhythm.
       </InfoBox>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
         {SHOTS.map((s,i)=>(
           <button key={s.label} onClick={()=>setSel(i)} style={i===sel?styles.btnActive:styles.btnChip}>{s.label}</button>
         ))}
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
-        <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{flex:"1 1 380px",minWidth:260,background:"#111",borderRadius:8,padding:12}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:6}}>FRAMING ON SCENE</div>
+          <canvas ref={frameRef} style={{display:"block",width:"100%"}}/>
+        </div>
+        <div style={{flex:"0 1 auto",background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12}}>
+          <div style={{color:"#a78bfa",fontSize:10,fontFamily:"monospace",marginBottom:6,letterSpacing:"0.08em"}}>RESULTING SHOT</div>
+          <canvas ref={resultRef} style={{display:"block",maxWidth:"100%"}}/>
+        </div>
       </div>
       <p style={styles.noteText}>📌 {S.note}</p>
     </div>
