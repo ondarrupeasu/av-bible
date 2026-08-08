@@ -477,6 +477,44 @@ function chromaSubsample(d,W,H,scheme){
     d[i+2]=Math.max(0,Math.min(255,y+1.8556*(cb-128))); }
 }
 
+function hslToRgb(h,s,l){
+  h/=360; const a=s*Math.min(l,1-l);
+  const f=n=>{ const k=(n+h*12)%12; return l-a*Math.max(-1,Math.min(k-3,9-k,1)); };
+  return [Math.round(f(0)*255),Math.round(f(8)*255),Math.round(f(4)*255)];
+}
+// Pixel-level chroma sampling grid: original → samples kept → reconstructed (interpolation)
+function drawChromaGrid(canvas, scheme){
+  const N=8, cell=24, pad=8, labelH=22, gap=26, gw=N*cell;
+  const W=gw*3+gap*2+pad*2, H=labelH+gw+22; canvas.width=W; canvas.height=H;
+  const ctx=canvas.getContext("2d"); ctx.fillStyle="#07090d"; ctx.fillRect(0,0,W,H);
+  const cl=v=>Math.max(0,Math.min(255,Math.round(v)));
+  const base=[]; for(let j=0;j<N;j++){ base[j]=[]; for(let i=0;i<N;i++) base[j][i]=hslToRgb(((i+j*1.4)/N)*360,0.85,0.55); }
+  const bw=scheme==="4:1:1"?4:scheme==="4:4:4"?1:2, bh=scheme==="4:2:0"?2:1;
+  const YC=(r,g,b)=>[0.2126*r+0.7152*g+0.0722*b, 128-0.168736*r-0.331264*g+0.5*b, 128+0.5*r-0.418688*g-0.081312*b];
+  const RGB=(Y,cb,cr)=>[Y+1.5748*(cr-128), Y-0.1873*(cb-128)-0.4681*(cr-128), Y+1.8556*(cb-128)];
+  const grid=(ox,mode)=>{
+    for(let j=0;j<N;j++) for(let i=0;i<N;i++){
+      let [r,g,b]=base[j][i];
+      if(mode==="kept" && !((i%bw===0)&&(j%bh===0))){ const [Y]=YC(r,g,b); r=g=b=Y; }
+      else if(mode==="recon"){
+        let scb=0,scr=0,n=0; const bi=Math.floor(i/bw)*bw, bj=Math.floor(j/bh)*bh;
+        for(let y=bj;y<Math.min(N,bj+bh);y++)for(let x=bi;x<Math.min(N,bi+bw);x++){ const c=YC(...base[y][x]); scb+=c[1];scr+=c[2];n++; }
+        const [Y]=YC(r,g,b); [r,g,b]=RGB(Y,scb/n,scr/n);
+      }
+      ctx.fillStyle=`rgb(${cl(r)},${cl(g)},${cl(b)})`; ctx.fillRect(ox+i*cell,labelH+j*cell,cell-1,cell-1);
+      if(mode==="kept"&&(i%bw===0)&&(j%bh===0)){ ctx.strokeStyle="rgba(255,255,255,0.95)"; ctx.lineWidth=1.5; ctx.strokeRect(ox+i*cell+2.5,labelH+j*cell+2.5,cell-6,cell-6); }
+    }
+    ctx.strokeStyle="rgba(255,255,255,0.08)"; ctx.lineWidth=1; ctx.strokeRect(ox,labelH,gw,gw);
+  };
+  ctx.font="11px monospace"; ctx.textAlign="center"; ctx.fillStyle="#9ca3af";
+  ctx.fillText("colour original",pad+gw/2,14);
+  ctx.fillText("chroma kept",pad+gw+gap+gw/2,14);
+  ctx.fillText("reconstructed",pad+2*(gw+gap)+gw/2,14);
+  grid(pad,"orig"); grid(pad+gw+gap,"kept"); grid(pad+2*(gw+gap),"recon");
+  const kept=(N/bw)*(N/bh);
+  ctx.textAlign="left"; ctx.fillStyle="#f59e0b"; ctx.font="bold 11px monospace";
+  ctx.fillText(`chroma samples kept: ${kept} of ${N*N}   ·   luma still ${N*N}`,pad,H-6);
+}
 const CHROMA_IW=260, CHROMA_IH=146, CHROMA_REGION={x:96,y:4,w:74,h:60};
 function ModuleChromaSubsampling() {
   const [sel, setSel] = useState(2);
@@ -484,7 +522,9 @@ function ModuleChromaSubsampling() {
   const S = SAMPLING[sel];
   const sceneRef = useRef();
   const magRef = useRef();
+  const gridRef = useRef();
   useEffect(()=>{
+    if(gridRef.current) drawChromaGrid(gridRef.current, S.label);
     const IW=CHROMA_IW, IH=CHROMA_IH, region=CHROMA_REGION;
     const src=document.createElement("canvas"); src.width=IW; src.height=IH;
     greenScreenScene(src.getContext("2d"), IW, IH);
@@ -547,6 +587,10 @@ function ModuleChromaSubsampling() {
           <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:6}}>LOUPE — the green / subject edge (pixel level)</div>
           <canvas ref={magRef} style={{display:"block",width:"100%"}}/>
         </div>
+      </div>
+      <div style={{background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12,marginTop:12,display:"block",maxWidth:"100%",overflowX:"auto"}}>
+        <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:8}}>PIXEL SAMPLING (8×8) — which chroma samples the codec keeps</div>
+        <canvas ref={gridRef} style={{display:"block",maxWidth:"100%"}}/>
       </div>
       <p style={styles.noteText}>📌 {S.note}</p>
     </div>
@@ -1259,16 +1303,22 @@ function ModuleDepthOfField() {
       const coc=(f*f/(N*Math.max(1,Dfmm-f)))*Math.abs(D-Dfmm)/D;   // CoC in mm
       return Math.min(24, coc*22);                                 // → display px
     };
-    // Scene layers, each blurred by its distance from the focus plane
+    // Scene layers, each blurred by its distance from focus.
+    // Blur via downscale→upscale (works in every browser; ctx.filter blur is unreliable in Safari).
     SCENE_LAYERS.forEach(l=>{
       const b=blurFor(LAYER_DIST[l.name] ?? l.depth);
-      ctx.save();
-      ctx.filter = b>0.4 ? `blur(${b.toFixed(1)}px)` : "none";
-      ctx.translate(W/2,H/2); ctx.scale(1.06,1.06); ctx.translate(-W/2,-H/2);   // overscan hides blurred edges
-      l.draw(ctx,W,H);
-      ctx.restore();
+      const lc=document.createElement("canvas"); lc.width=W; lc.height=H;
+      const lctx=lc.getContext("2d");
+      lctx.save(); lctx.translate(W/2,H/2); lctx.scale(1.06,1.06); lctx.translate(-W/2,-H/2); l.draw(lctx,W,H); lctx.restore();
+      if(b<0.6){ ctx.drawImage(lc,0,0); }
+      else {
+        const s=Math.max(0.04, 1/(1+b*0.5));
+        const dw=Math.max(2,Math.round(W*s)), dh=Math.max(2,Math.round(H*s));
+        const dc=document.createElement("canvas"); dc.width=dw; dc.height=dh;
+        const dctx=dc.getContext("2d"); dctx.imageSmoothingEnabled=true; dctx.drawImage(lc,0,0,dw,dh);
+        ctx.imageSmoothingEnabled=true; ctx.drawImage(dc,0,0,W,H);
+      }
     });
-    ctx.filter="none";
     // HUD on the front view
     ctx.fillStyle="rgba(0,0,0,0.65)"; ctx.fillRect(0,0,W,24);
     ctx.fillStyle="#f59e0b"; ctx.font="bold 12px monospace";
@@ -1666,19 +1716,30 @@ function ModuleColorTemp() {
 // ─────────────────────────────────────────────
 // MODULE: RAW vs Compressed
 // ─────────────────────────────────────────────
-// Shared scene → scene-linear with headroom (highlights — sky/sun — expanded above 1.0)
+// Interior room with a bright window (the classic latitude test): the window blows out;
+// RAW keeps several stops of headroom outside, compressed clips at capture.
 function rawSceneLinear(IW,IH){
-  const c=document.createElement("canvas"); c.width=IW; c.height=IH;
-  drawScene(c.getContext("2d"), IW, IH);
-  const d=c.getContext("2d").getImageData(0,0,IW,IH).data;
   const buf=new Float32Array(IW*IH*3);
-  const toLin=v=> v<=0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055,2.4);
-  const sstep=(a,b,x)=>{ const t=Math.max(0,Math.min(1,(x-a)/(b-a))); return t*t*(3-2*t); };
-  for(let p=0,i=0;p<IW*IH;p++,i+=4){
-    const r=toLin(d[i]/255), g=toLin(d[i+1]/255), b=toLin(d[i+2]/255);
-    const lum=0.2126*r+0.7152*g+0.0722*b;
-    const boost=1+sstep(0.5,1.0,lum)*7;   // expand highlights into the RAW headroom
-    buf[p*3]=r*boost; buf[p*3+1]=g*boost; buf[p*3+2]=b*boost;
+  const wx0=0.40, wx1=0.90, wy0=0.16, wy1=0.76;
+  for(let y=0;y<IH;y++) for(let x=0;x<IW;x++){
+    const u=x/IW, v=y/IH; let r,g,b;
+    const inWin = u>wx0&&u<wx1&&v>wy0&&v<wy1;
+    if(inWin){
+      const wu=(u-wx0)/(wx1-wx0), wv=(v-wy0)/(wy1-wy0);
+      let sky=(2.7 - wv*1.1) * (0.8+0.45*Math.sin(wu*9+wv*4)*Math.sin(wu*4-0.6));   // bright sky + clouds
+      const mtn=0.56+0.09*Math.sin(wu*7+1);
+      let val = wv>mtn ? 1.15*(0.82+0.18*Math.sin(wu*22)) : sky;                     // mountains lower down
+      const dd=Math.hypot(wu-0.70,(wv-0.26)*1.4); if(dd<0.1) val += (0.1-dd)/0.1*7;  // sun
+      r=val*1.03; g=val; b=val*0.85;
+      if(Math.abs(wu-0.5)<0.010 || Math.abs(wv-0.52)<0.014){ r=0.04;g=0.04;b=0.05; } // window mullions
+    } else {
+      let base=0.09*(0.9+0.2*Math.sin(u*28)*Math.sin(v*16));
+      if(v>0.76) base=0.11+(v-0.76)*0.45;                    // floor
+      r=base*0.95; g=base*0.9; b=base*0.8;
+      const near=(u>wx0-0.02&&u<wx1+0.02&&v>wy0-0.03&&v<wy1+0.03); if(near){ r*=0.5;g*=0.5;b*=0.5; } // dark window frame
+      const ld=Math.hypot(u-0.15,v-0.34); if(ld<0.13){ const k=(0.13-ld)/0.13; r+=k*0.55; g+=k*0.42; b+=k*0.22; } // warm lamp (shadow detail)
+    }
+    const p=(y*IW+x)*3; buf[p]=Math.max(0,r); buf[p+1]=Math.max(0,g); buf[p+2]=Math.max(0,b);
   }
   return buf;
 }
