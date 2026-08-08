@@ -56,7 +56,7 @@ const CATEGORIES = [
   },
   {
     id: "color", label: T.categories.color,
-    modules: ["pictureProfiles","colorSpaces","aces","colorTemp"],
+    modules: ["colorTemp","pictureProfiles","colorSpaces","aces"],
   },
   {
     id: "defects", label: T.categories.defects,
@@ -151,10 +151,10 @@ const SCENE_LAYERS = [
     ctx.lineTo(W,horizon+2); ctx.closePath(); ctx.fill();
   }},
   { name:"ground", depth:30, draw:(ctx,W,H)=>{
-    const horizon=H*0.60;
-    const gnd=ctx.createLinearGradient(0,horizon,0,H);
+    const horizon=H*0.60, top=horizon-H*0.03;   // slight overlap up so parallax (crane) can't open a horizon seam
+    const gnd=ctx.createLinearGradient(0,top,0,H);
     gnd.addColorStop(0,"#5a7048"); gnd.addColorStop(1,"#33452a");
-    ctx.fillStyle=gnd; ctx.fillRect(0,horizon-1,W,H-horizon+1);
+    ctx.fillStyle=gnd; ctx.fillRect(0,top,W,H-top);
     // road (perspective)
     const vpX=W*0.46;
     const rg=ctx.createLinearGradient(0,horizon,0,H);
@@ -514,8 +514,8 @@ function ModuleChromaSubsampling() {
 const LOG_CURVES = {
   "Linear":  x => x,
   "Rec.709": x => x < 0.018 ? x * 4.5 : 1.099 * Math.pow(x, 0.45) - 0.099,
-  "S-Log2":  x => x <= 0 ? 0.030001222851889303 : 0.432699 * Math.log10(x / 0.01 + 1) + 0.616596 + 0.03,
-  "S-Log3":  x => x < 0.01125 ? x * 5.26315 + 0.092864 : 0.2098553 * Math.log10((x + 0.01) / (0.18 + 0.01)) + 0.420810,
+  "S-Log2":  x => 0.432699 * Math.log10(Math.max(0,155*x/219) + 0.037584) + 0.646596,   // Sony S-Log2 (18% grey → 0.32)
+  "S-Log3":  x => x >= 0.01125 ? (420 + Math.log10((x + 0.01)/0.19)*261.5)/1023 : (x*(171.2102946-95)/0.01125 + 95)/1023,  // Sony S-Log3
   "Log-C":   x => x > 0.010591 ? 0.247190 * Math.log10(5.555556 * x + 0.052272) + 0.385537 : x * 5.367655 + 0.092809,
   "V-Log":   x => x < 0.01 ? 5.6 * x + 0.125 : 0.241514 * Math.log10(x + 0.00873) + 0.598206,
   "C-Log3":  x => x < 0.000511 ? 5.48228 * x + 0.073059 : 0.332424 * Math.log10(2.3069 * x + 0.888282) + 0.573261,
@@ -526,15 +526,13 @@ const LOG_COLORS = {
 };
 
 function ModulePictureProfiles({ image }) {
-  const [active, setActive] = useState(["Rec.709","S-Log2","Log-C"]);
+  const [active, setActive] = useState(["Rec.709"]);
   const [hoveredX, setHoveredX] = useState(null);
   const canvasRef = useRef();
   const graphRef = useRef();
   const W=320, H=240;
 
-  const toggle = name => setActive(prev =>
-    prev.includes(name) ? prev.filter(x=>x!==name) : [...prev,name]
-  );
+  const toggle = name => setActive([name]);   // single-select
 
   useEffect(()=>{
     const gc=graphRef.current; if(!gc)return;
@@ -590,7 +588,7 @@ function ModulePictureProfiles({ image }) {
       const idata=tmp.getContext("2d").getImageData(0,0,c.width,c.height);
       const d=idata.data;
       // apply first active curve
-      const curveName=active.find(n=>n!=="Rec.709")||active[0]||"Rec.709";
+      const curveName=active[0]||"Rec.709";
       const fn=LOG_CURVES[curveName]||LOG_CURVES["Rec.709"];
       const baseFn=LOG_CURVES["Rec.709"];
       for(let i=0;i<d.length;i+=4){
@@ -841,7 +839,7 @@ function ModuleRollingShutter() {
         </button>
       </div>
       <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
-        <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
+        <canvas ref={canvasRef} style={{display:"block",width:"100%",maxWidth:720}}/>
       </div>
       <p style={styles.noteText}>📌 At high speeds, the yellow bar visibly leans (skews) due to the sequential line readout. This is rolling shutter. Blue line shows the sensor's current read row.</p>
     </div>
@@ -903,7 +901,7 @@ function ModuleMoire() {
         </button>
       </div>
       <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
-        <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
+        <canvas ref={canvasRef} style={{display:"block",width:"100%",maxWidth:720}}/>
       </div>
       <p style={styles.noteText}>📌 Move Grid A and B to similar values to see moiré intensify. Enable AA to see how filtering reduces the artifact (at the cost of some sharpness).</p>
     </div>
@@ -950,11 +948,8 @@ function ModuleBanding() {
         <strong>Bit depth</strong> defines the number of discrete tonal steps per channel: <em>2ⁿ steps</em>. At <strong>8-bit</strong> (256 steps), smooth gradients — especially in skies or skin — show <strong>banding</strong> (posterization): visible tonal jumps. At <strong>10-bit</strong> (1024 steps) the jumps are ~4× smaller and visually imperceptible in most content. <strong>12-bit</strong> (4096) and <strong>16-bit</strong> (65,536) are common in RAW and high-end cinema workflows. H.265 Main 10 Profile and ProRes 4444 support 10-bit. H.264 is natively 8-bit. Banding is also exacerbated by heavy colour grading on 8-bit footage.
       </InfoBox>
       <div style={{marginBottom:12}}>
-        <label style={styles.label}>
-          Bit depth: <strong style={{color:"#f59e0b"}}>{bits}-bit ({Math.pow(2,bits)} steps)</strong>
-          <input type="range" min={2} max={16} value={bits} onChange={e=>setBits(+e.target.value)} style={styles.slider}/>
-        </label>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+        <div style={{color:"#9ca3af",fontSize:12,marginBottom:8}}>Bit depth: <strong style={{color:"#f59e0b"}}>{bits}-bit ({Math.pow(2,bits).toLocaleString()} steps)</strong></div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {[2,4,6,8,10,12,14,16].map(b=>(
             <button key={b} onClick={()=>setBits(b)} style={b===bits?styles.btnActive:styles.btnChip}>{b}-bit</button>
           ))}
