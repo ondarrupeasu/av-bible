@@ -1202,6 +1202,7 @@ function ModuleDepthOfField() {
   const [focal, setFocal] = useState(50);
   const [distance, setDistance] = useState(5);
   const canvasRef = useRef();
+  const sideRef = useRef();
 
   // Thin-lens DoF limits (CoC 0.03mm, 35mm format). All in mm.
   const CoC=0.03, f=focal, N=fstop, s=distance*1000;
@@ -1233,31 +1234,55 @@ function ModuleDepthOfField() {
       ctx.restore();
     });
     ctx.filter="none";
-    // Depth ruler (log scale) — where each element sits + the in-focus band
-    const pad=44, rulerY=H-26, x1=pad, x2=W-16;
-    const lx=d=>x1+(Math.log(Math.max(1,d))/Math.log(600))*(x2-x1);
-    ctx.strokeStyle="#374151"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x1,rulerY); ctx.lineTo(x2,rulerY); ctx.stroke();
-    // sharp band
-    const bx1=lx(Dn/1000), bx2=lx(farInf?600:Df/1000);
-    ctx.fillStyle="rgba(52,211,153,0.35)"; ctx.fillRect(bx1,rulerY-4,Math.max(2,bx2-bx1),8);
-    // focus marker
-    ctx.strokeStyle="#f59e0b"; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(lx(distance),rulerY-8); ctx.lineTo(lx(distance),rulerY+8); ctx.stroke();
-    // element ticks
-    ctx.font="9px monospace"; ctx.textAlign="center";
-    [["FG",1.8],["subj",5],["tree",8],["house",16],["mtns",300]].forEach(([lbl,d])=>{
-      const x=lx(d); ctx.fillStyle="#6b7280"; ctx.beginPath();ctx.arc(x,rulerY,2,0,7);ctx.fill(); ctx.fillText(lbl,x,rulerY+16);
-    });
-    ctx.textAlign="left";
-    // HUD
+    // HUD on the front view
     ctx.fillStyle="rgba(0,0,0,0.65)"; ctx.fillRect(0,0,W,24);
     ctx.fillStyle="#f59e0b"; ctx.font="bold 12px monospace";
-    ctx.fillText(`f/${fstop}  ${focal}mm  focus ${distance}m  ·  DoF ${dofM===Infinity?"∞":dofM.toFixed(2)+"m"}  ·  green = in focus`,10,16);
+    ctx.fillText(`f/${fstop}  ${focal}mm  focus ${distance}m  ·  DoF ${dofM===Infinity?"∞":dofM.toFixed(2)+"m"}`,10,16);
+
+    // SIDE VIEW — depth cross-section with the in-focus "force field"
+    const sc=sideRef.current; if(!sc) return;
+    const SW=W, SH=Math.round(W*0.34); sc.width=SW; sc.height=SH;
+    const sx=sc.getContext("2d");
+    sx.fillStyle="#0d1117"; sx.fillRect(0,0,SW,SH);
+    const x1=54, x2=SW-22, groundY=SH-28, K=9;
+    const dmap=d=> x1 + (d/(d+K))*(x2-x1);            // hyperbolic depth mapping (∞ → x2)
+    sx.strokeStyle="#1f2937"; sx.lineWidth=1; sx.beginPath();sx.moveTo(x1,groundY);sx.lineTo(x2,groundY);sx.stroke();
+    // DoF "force field" band around the focus plane
+    const dnX=dmap(Dn/1000), dfX=farInf?x2:dmap(Df/1000);
+    const g=sx.createLinearGradient(dnX,0,dfX,0);
+    g.addColorStop(0,"rgba(52,211,153,0.06)");g.addColorStop(0.5,"rgba(52,211,153,0.30)");g.addColorStop(1,"rgba(52,211,153,0.06)");
+    sx.fillStyle=g; sx.fillRect(dnX,18,Math.max(2,dfX-dnX),groundY-18);
+    sx.strokeStyle="rgba(52,211,153,0.6)"; sx.setLineDash([4,3]);
+    sx.beginPath();sx.moveTo(dnX,18);sx.lineTo(dnX,groundY);sx.stroke();
+    sx.beginPath();sx.moveTo(dfX,18);sx.lineTo(dfX,groundY);sx.stroke(); sx.setLineDash([]);
+    // lens cone from the camera to the focus band
+    sx.strokeStyle="rgba(148,163,184,0.22)"; sx.beginPath();sx.moveTo(x1,groundY-7);sx.lineTo(dfX,20);sx.moveTo(x1,groundY-7);sx.lineTo(dfX,groundY);sx.stroke();
+    // distance ticks
+    sx.textAlign="center"; sx.font="9px monospace";
+    [1,2,5,10,20,40].forEach(d=>{ const x=dmap(d); sx.strokeStyle="#374151"; sx.beginPath();sx.moveTo(x,groundY);sx.lineTo(x,groundY+4);sx.stroke(); sx.fillStyle="#4b5563"; sx.fillText(d+"m",x,groundY+15); });
+    sx.fillStyle="#4b5563"; sx.fillText("∞",x2,groundY+15);
+    // focus plane
+    const fX=dmap(distance);
+    sx.strokeStyle="#f59e0b"; sx.lineWidth=2; sx.beginPath();sx.moveTo(fX,12);sx.lineTo(fX,groundY);sx.stroke();
+    sx.fillStyle="#f59e0b"; sx.fillText("focus",fX,9);
+    // camera
+    sx.fillStyle="#9ca3af"; sx.fillRect(x1-15,groundY-13,15,13);
+    sx.beginPath();sx.moveTo(x1,groundY-10);sx.lineTo(x1+7,groundY-6.5);sx.lineTo(x1,groundY-3);sx.closePath();sx.fill();
+    // element markers (lit green when inside the DoF band)
+    [["bush",1.8,"#2c4a22"],["subject",5,"#c0563d"],["tree",8,"#3f6a3c"],["house",16,"#8a5a3c"]].forEach(([lbl,d,col])=>{
+      const x=dmap(d), sharp = d>=Dn/1000 && d<=(farInf?1e9:Df/1000);
+      sx.fillStyle=col; sx.fillRect(x-4,groundY-22,8,22);
+      sx.strokeStyle=sharp?"#34d399":"rgba(255,255,255,0.18)"; sx.lineWidth=sharp?2:1; sx.strokeRect(x-4,groundY-22,8,22);
+      sx.fillStyle=sharp?"#34d399":"#6b7280"; sx.fillText(lbl,x,groundY-26);
+    });
+    sx.textAlign="left"; sx.fillStyle="#22d3ee"; sx.font="bold 11px monospace";
+    sx.fillText("SIDE VIEW — green zone = in focus (moves & widens with your settings)",8,14);
   },[fstop,focal,distance]);
 
   return (
     <div>
       <InfoBox>
-        <strong>Depth of Field (DoF)</strong> is the range of distances that appears acceptably sharp. It depends on <em>aperture</em> (smaller f-stop = wider = shallower DoF), <em>focal length</em> (longer = shallower), and <em>focus distance</em> (closer = shallower). Here the <strong>scene elements at different distances</strong> (foreground bush ~1.8 m, subject ~5 m, tree ~8 m, house ~16 m, hills/mountains far away) blur according to a thin-lens <strong>Circle of Confusion</strong> model (0.03 mm, 35 mm format). Open the aperture or move focus and watch which planes fall out of focus. Beyond the <em>hyperfocal distance</em> everything to infinity is sharp. Shallow DoF isolates the subject; deep DoF holds context.
+        <strong>Depth of Field (DoF)</strong> is the range of distances that appears acceptably sharp. It depends on <em>aperture</em> (smaller f-stop = wider = shallower DoF), <em>focal length</em> (longer = shallower), and <em>focus distance</em> (closer = shallower). Here the <strong>scene elements at different distances</strong> (foreground bush ~1.8 m, subject ~5 m, tree ~8 m, house ~16 m, hills/mountains far away) blur according to a thin-lens <strong>Circle of Confusion</strong> model (0.03 mm, 35 mm format). Open the aperture or move focus and watch which planes fall out of focus. The <strong>side view</strong> below is a bird's-eye cross-section: the camera on the left, distance running right, and the green <strong>in-focus zone</strong> (the depth of field) as a band that moves with the focus plane and <em>widens</em> as you stop down or shorten the lens — elements light up green when they fall inside it. Beyond the <em>hyperfocal distance</em> everything to infinity is sharp. Shallow DoF isolates the subject; deep DoF holds context.
       </InfoBox>
       <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:12}}>
         <label style={styles.label}>
@@ -1278,8 +1303,12 @@ function ModuleDepthOfField() {
         <StatBadge label="Near limit" value={(Dn/1000).toFixed(2)+"m"}/>
         <StatBadge label="Far limit" value={farInf?"∞":(Df/1000).toFixed(2)+"m"}/>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
-        <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
+      <div style={{background:"#111",borderRadius:8,padding:12,display:"block",maxWidth:"100%",marginBottom:10}}>
+        <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:6}}>FRONT VIEW (what the lens sees)</div>
+        <canvas ref={canvasRef} style={{display:"block",width:"100%",borderRadius:4}}/>
+      </div>
+      <div style={{background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12,display:"block",maxWidth:"100%"}}>
+        <canvas ref={sideRef} style={{display:"block",width:"100%"}}/>
       </div>
     </div>
   );
