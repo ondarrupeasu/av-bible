@@ -18,6 +18,7 @@ const STRINGS = {
       defects: "Artifacts & Defects",
       narrative: "Narrative & Camera",
       scopes: "Monitoring & Scopes",
+      signals: "Signals & Connectivity",
     },
     modules: {
       aspectRatio: { title: "Aspect Ratio", desc: "Explore how different ratios frame the world" },
@@ -45,6 +46,7 @@ const STRINGS = {
       lut: { title: "LUTs", desc: "1D & 3D lookup tables — technical vs creative looks" },
       codecs: { title: "Compression & Codecs", desc: "Intra vs inter, DCT blocking, I/P/B frames, the codec table" },
       containers: { title: "Containers & Wrappers", desc: "MOV, MP4, MXF, MKV — codec ≠ container" },
+      signals: { title: "Signals & Connectivity", desc: "HDMI, SDI, fibre, NDI, SRT, XLR, DMX — cables vs IP transports" },
     },
   },
 };
@@ -78,6 +80,10 @@ const CATEGORIES = [
   {
     id: "scopes", label: T.categories.scopes,
     modules: ["scopes","falseColor"],
+  },
+  {
+    id: "signals", label: T.categories.signals,
+    modules: ["signals"],
   },
 ];
 
@@ -2736,6 +2742,86 @@ function ModuleContainers() {
 }
 
 // ─────────────────────────────────────────────
+// MODULE: Signals & Connectivity
+// ─────────────────────────────────────────────
+const CARRIES={video:["🎬","video"],audio:["🔊","audio"],data:["🖧","data"],control:["🎛","control"],tally:["🔴","tally"],power:["⚡","power"],tc:["⏱","timecode"]};
+const SIGNALS=[
+  {id:"hdmi",cat:"physical",name:"HDMI",conn:"HDMI Type-A",carries:["video","audio","control"],dist:"~5 m passive · ~15–30 m active/optical",bw:"up to 48 Gb/s (2.1)",lic:"Licensed",open:false,
+   note:"Consumer/prosumer. The connector doesn't lock — it pulls out easily, so on set you tape it or use a clamp. No native long runs; convert to SDI or fibre for distance."},
+  {id:"sdi",cat:"physical",name:"SDI (HD/3G/6G/12G)",conn:"BNC · 75Ω coax",carries:["video","audio","tc"],dist:"12G ~40–70 m · 3G ~100 m · HD ~140 m",bw:"12G-SDI = 12 Gb/s (2160p60)",lic:"Open · SMPTE",open:true,
+   note:"The professional/broadcast cable. Locking BNC, long runs, embedded audio + timecode down one coax. Point-to-point, one direction."},
+  {id:"fiber",cat:"physical",name:"Fibre optic",conn:"LC / SC · SMPTE 304 hybrid",carries:["video","audio","data","power"],dist:"Kilometres (single-mode)",bw:"Effectively unlimited",lic:"Open",open:true,
+   note:"For very long runs — stadiums, outside broadcast. Needs converters at both ends. SMPTE hybrid cable also carries camera power and return signals."},
+  {id:"eth",cat:"physical",name:"Ethernet",conn:"RJ45 / etherCON · Cat5e/6",carries:["data"],dist:"100 m per copper run · switches extend",bw:"1 / 2.5 / 10 GbE",lic:"Open · IEEE",open:true,
+   note:"Not a video signal — it's the road the IP transports drive on. NDI, SRT, Dante and Art-Net all ride this. etherCON = rugged locking RJ45 for touring."},
+  {id:"usbc",cat:"physical",name:"USB-C",conn:"USB-C",carries:["video","audio","data","power"],dist:"~1–2 m passive",bw:"up to 40 Gb/s (USB4/TB)",lic:"Open · USB-IF",open:true,
+   note:"UVC webcams and capture devices, short runs. Handy, not a professional distribution cable."},
+  {id:"xlr",cat:"physical",name:"XLR-3 (audio)",conn:"XLR 3-pin",carries:["audio"],dist:"~100 m balanced",bw:"—",lic:"Open",open:true,
+   note:"⚠ Balanced analogue audio (mic/line). Looks identical to 3-pin DMX but carries a completely different signal — never cross the two."},
+  {id:"dmx",cat:"physical",name:"DMX512",conn:"XLR 5-pin (std) / 3-pin (common)",carries:["data","control"],dist:"~300 m · 32 devices per run",bw:"512 channels / universe",lic:"Open · ANSI E1.11",open:true,
+   note:"⚠ Digital lighting-control DATA over RS-485 — not audio, despite the XLR shell. Daisy-chain fixtures and terminate the last one. Detailed in the Lighting module."},
+  {id:"ndi",cat:"ip",name:"NDI",conn:"rides on Ethernet / IP",carries:["video","audio","tally","control"],dist:"LAN (network-limited)",bw:"~100–250 Mb/s Full · HX low-bitrate",lic:"Proprietary · SDK free",open:false,
+   note:"IP video over an ordinary LAN — NOT a cable. Full needs 1GbE+; HX is compressed for WiFi. Auto-discovery and tally are built in. See LiveMixR-style workflows."},
+  {id:"srt",cat:"ip",name:"SRT",conn:"rides on IP / internet",carries:["video","audio"],dist:"Internet (WAN)",bw:"Adaptive",lic:"Open · royalty-free",open:true,
+   note:"Reliable video over the unpredictable public internet: recovers lost packets (ARQ) and can encrypt. The go-to for contribution feeds over 4G/5G/home links."},
+  {id:"rtmp",cat:"ip",name:"RTMP",conn:"rides on IP / internet",carries:["video","audio"],dist:"Internet (WAN)",bw:"Depends on encoder",lic:"Open · legacy",open:true,
+   note:"The classic livestream ingest to YouTube/Twitch. Ageing (H.264/AAC only) but universally accepted by platforms for delivery."},
+  {id:"dante",cat:"ip",name:"Dante",conn:"rides on Ethernet / IP",carries:["audio","data"],dist:"LAN",bw:"Hundreds of channels",lic:"Proprietary · Audinate",open:false,
+   note:"Audio-over-IP, the install/live-sound standard. Not video. AES67 is the open layer that lets Dante interoperate with other AoIP systems."},
+  {id:"artnet",cat:"ip",name:"Art-Net / sACN",conn:"rides on Ethernet / IP",carries:["control","data"],dist:"LAN",bw:"Many DMX universes",lic:"Open",open:true,
+   note:"DMX over the network: many universes down one Ethernet cable to nodes that break out to physical DMX runs. The backbone of larger lighting rigs. See Lighting."},
+];
+function ModuleSignals() {
+  const [sel,setSel]=useState("sdi");
+  const s=SIGNALS.find(x=>x.id===sel)||SIGNALS[0];
+  const phys=SIGNALS.filter(x=>x.cat==="physical"), ip=SIGNALS.filter(x=>x.cat==="ip");
+  const Chip=x=>(
+    <button key={x.id} onClick={()=>setSel(x.id)} style={sel===x.id?styles.btnActive:styles.btnChip}>{x.name}</button>
+  );
+  return (
+    <div>
+      <InfoBox>
+        Signals are easiest to understand on <strong>three separate axes</strong>, because people constantly mix them up. <strong>(1) The physical interface</strong> — the cable and connector you can hold: HDMI, SDI (BNC coax), fibre, Ethernet (RJ45), USB-C, XLR. <strong>(2) The transport / protocol</strong> — <em>how</em> the data travels, especially over a network: <span style={{color:"#2dd4bf"}}>NDI, SRT, RTMP, Dante, Art-Net are NOT cables</span> — they ride <em>on top of</em> Ethernet/IP. <strong>(3) What it carries</strong> — video, audio, data, control, tally, power; some cables carry several at once (SDI = video + audio + timecode). Then judge each by <em>distance limits</em> and <em>open vs licensed</em>. The classic trap: a 3-pin <strong>XLR</strong> can be <em>balanced audio</em> or <em>DMX lighting data</em> — same plug, totally different signal.
+      </InfoBox>
+      <div style={{background:"#0f1a1a",border:"1px solid #164e46",borderRadius:8,padding:"10px 14px",marginBottom:14,color:"#5eead4",fontSize:13}}>
+        🌐 <strong>Cables vs transports.</strong> Ethernet is the road; <strong>NDI, SRT, Dante, Art-Net</strong> are vehicles that drive on it. Asking "NDI or a cable?" is the wrong question — NDI <em>runs over</em> a cable.
+      </div>
+      <div style={{marginBottom:6,color:"#6b7280",fontSize:10,fontFamily:"monospace",letterSpacing:"0.08em"}}>PHYSICAL INTERFACES (cables &amp; connectors)</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>{phys.map(Chip)}</div>
+      <div style={{marginBottom:6,color:"#6b7280",fontSize:10,fontFamily:"monospace",letterSpacing:"0.08em"}}>IP TRANSPORTS / PROTOCOLS (ride on Ethernet)</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>{ip.map(Chip)}</div>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{flex:"1 1 340px",minWidth:300,background:"#0d1117",border:`1px solid ${s.cat==="ip"?"#164e46":"#1f2937"}`,borderRadius:10,padding:"14px 18px"}}>
+          <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:6}}>
+            <span style={{color:"#f3f4f6",fontSize:17,fontWeight:"bold"}}>{s.name}</span>
+            <span style={{fontSize:11,fontFamily:"monospace",padding:"3px 8px",borderRadius:4,background:s.cat==="ip"?"#134e4a":"#1e3a5f",color:s.cat==="ip"?"#5eead4":"#93c5fd"}}>
+              {s.cat==="ip"?"IP TRANSPORT":"PHYSICAL CABLE"}
+            </span>
+          </div>
+          <ContainerRow label="connector" value={s.conn} accent="#e5e7eb"/>
+          <div style={{display:"flex",gap:10,padding:"7px 0",borderBottom:"1px solid #161c26",fontSize:12.5}}>
+            <span style={{color:"#6b7280",width:96,flexShrink:0,fontFamily:"monospace",fontSize:11}}>carries</span>
+            <span style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+              {s.carries.map(k=>(<span key={k} style={{color:"#d1d5db"}}>{CARRIES[k][0]} {CARRIES[k][1]}</span>))}
+            </span>
+          </div>
+          <ContainerRow label="max distance" value={s.dist} accent="#fcd34d"/>
+          <ContainerRow label="bandwidth" value={s.bw}/>
+          <div style={{display:"flex",gap:10,padding:"7px 0",fontSize:12.5}}>
+            <span style={{color:"#6b7280",width:96,flexShrink:0,fontFamily:"monospace",fontSize:11}}>licence</span>
+            <span style={{color:s.open?"#86efac":"#fca5a5"}}>{s.lic}</span>
+          </div>
+        </div>
+        <div style={{flex:"1 1 240px",minWidth:220,background:"#111",borderRadius:10,padding:"14px 18px",color:"#d1d5db",fontSize:13,lineHeight:1.7}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:8,letterSpacing:"0.08em"}}>NOTES</div>
+          {s.note}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // Module registry map
 // ─────────────────────────────────────────────
 const MODULE_COMPONENTS = {
@@ -2745,6 +2831,7 @@ const MODULE_COMPONENTS = {
   lut: ModuleLUT,
   codecs: ModuleCodecs,
   containers: ModuleContainers,
+  signals: ModuleSignals,
   resolution: ModuleResolution,
   chromaSubsampling: ModuleChromaSubsampling,
   raw: ModuleRAW,
@@ -2768,7 +2855,7 @@ const MODULE_COMPONENTS = {
 
 const CATEGORY_COLORS = {
   image:"#60a5fa", color:"#f59e0b", defects:"#f87171",
-  optics:"#34d399", narrative:"#a78bfa", scopes:"#22d3ee",
+  optics:"#34d399", narrative:"#a78bfa", scopes:"#22d3ee", signals:"#2dd4bf",
 };
 
 // ─────────────────────────────────────────────
