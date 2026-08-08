@@ -67,7 +67,27 @@ imprescindible (ver más abajo). Orden acordado con el usuario:
 - Scopes: PIP overlay sobre escena + histograma monocromo + Hue. RAW vs Compressed: waveform
   (RAW recupera = spread; H.264 = línea recta clipada).
 
-**Módulos nuevos (Grupo 4, ampliado con ideas del usuario):**
+**HECHO — Grupo 4 (módulos nuevos), todo en vivo (ago 2026):**
+- Correcciones ronda 3: RAW = habitación amueblada con ventana (headroom ×6.5, RAW
+  recupera / H.264 gris); Chroma rejilla 8×8 con el borde verde→piel del modelo; DoF
+  blur suave por reducción progresiva (no pixela, cross-browser sin ctx.filter).
+- **LUTs** (Color Science): 6 looks técnico/creativos + split source/LUT; 1D vs 3D.
+- **False Color** (Monitoring): luma→IRE a paleta de set + leyenda.
+- **Exposure Triangle** (Image): shutter/apertura/ISO con motion blur + grano reales + EV.
+- **Compression & Codecs** (Image): macrobloques 8×8 (slider bitrate) + GOP I/P/B con
+  flechas + tabla de 8 códecs. **Containers & Wrappers**: códec≠contenedor, matriz de pistas.
+- **Signals & Connectivity** (CATEGORÍA nueva, teal): 3 ejes (cable físico / transporte
+  IP / qué transporta) + distancias + XLR-audio vs DMX.
+- **Lighting** (CATEGORÍA nueva, amarillo): **Portrait Lighting** 2.5D (cara por relieve
+  de normales, N·L+especular, key arrastrable cenital, patrones Rembrandt/butterfly/
+  loop/split/rim) + **DMX Control** (universo 512ch, patch por dirección, fixtures con
+  personalidad, Art-Net/sACN). Módulo educativo, distinto de la app DMXSimulatoR.
+- Artefactos: **Lens Distortion** (barrel/pincushion), **Interlacing & Combing**,
+  **Halation & Bloom**, **Flicker & Rolling Bands** (animado), **Focus Breathing** (animado).
+
+Total: ~33 módulos, 8 categorías. Fixes helper: ExpRow hoisted (no remontar sliders).
+
+**Ideas originales del Grupo 4 (referencia, ya implementadas):**
 - LUT; False Color; Exposure Triangle (shutter/apertura/ISO sobre imagen real).
 - Separar RAW → **Compresión/Codecs** (macrobloques + comparativa: intra/inter,
   DCT/wavelet, grado, calidad, bit depth 8/10/12+, alfa, propietario vs abierto:
