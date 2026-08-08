@@ -253,37 +253,39 @@ function ModuleAspectRatio({ image }) {
     const img = new Image();
     img.onload = () => {
       const c = canvasRef.current; if(!c)return;
-      const r = RATIOS[sel];
-      const maxW = Math.min(c.parentElement.clientWidth - 32, 900);
-      const maxH = 460;
-      let cw, ch;
-      if(r.w/r.h > maxW/maxH){ cw=maxW; ch=maxW*r.h/r.w; }
-      else{ ch=maxH; cw=maxH*r.w/r.h; }
+      const cw = Math.min(c.parentElement.clientWidth - 32, 900);
+      const imgA = img.width/img.height;
+      const ch = Math.round(cw/imgA);
       c.width=cw; c.height=ch;
       const ctx=c.getContext("2d");
-      // letterbox fill
-      ctx.fillStyle="#000"; ctx.fillRect(0,0,cw,ch);
-      // cover-fit
-      const ir=img.width/img.height;
-      let sx,sy,sw,sh;
-      if(ir>r.w/r.h){ sw=img.height*(r.w/r.h); sh=img.height; sx=(img.width-sw)/2; sy=0; }
-      else{ sh=img.width/(r.w/r.h); sw=img.width; sy=(img.height-sh)/2; sx=0; }
-      ctx.drawImage(img,sx,sy,sw,sh,0,0,cw,ch);
-      // safe area guide
-      ctx.strokeStyle="rgba(245,158,11,0.5)"; ctx.lineWidth=1; ctx.setLineDash([4,4]);
-      ctx.strokeRect(cw*0.05,ch*0.05,cw*0.9,ch*0.9);
+      // The image stays as-is; the ratio is shown as a semi-transparent letterbox over it
+      ctx.drawImage(img,0,0,cw,ch);
+      const r=RATIOS[sel], ra=r.w/r.h;
+      let cropW,cropH,cropX,cropY;
+      if(ra>=imgA){ cropW=cw; cropH=cw/ra; cropX=0; cropY=(ch-cropH)/2; }   // wider → letterbox (top/bottom)
+      else       { cropH=ch; cropW=ch*ra; cropY=0; cropX=(cw-cropW)/2; }   // taller → pillarbox (sides)
+      // semi-transparent bars over the cropped-out areas (still visible underneath)
+      ctx.fillStyle="rgba(6,6,9,0.62)";
+      if(cropY>0.5){ ctx.fillRect(0,0,cw,cropY); ctx.fillRect(0,cropY+cropH,cw,ch-cropY-cropH); }
+      if(cropX>0.5){ ctx.fillRect(0,0,cropX,ch); ctx.fillRect(cropX+cropW,0,cw-cropX-cropW,ch); }
+      // frame around what the ratio keeps
+      ctx.strokeStyle="#f59e0b"; ctx.lineWidth=2;
+      ctx.strokeRect(cropX+1,cropY+1,cropW-2,cropH-2);
+      // action-safe guide inside the kept frame (EBU R 95, 5% inset)
+      ctx.strokeStyle="rgba(245,158,11,0.35)"; ctx.setLineDash([5,5]); ctx.lineWidth=1;
+      ctx.strokeRect(cropX+cropW*0.05,cropY+cropH*0.05,cropW*0.9,cropH*0.9);
       ctx.setLineDash([]);
       // label
-      ctx.fillStyle="rgba(0,0,0,0.6)"; ctx.fillRect(8,8,120,24);
+      ctx.fillStyle="rgba(0,0,0,0.7)"; ctx.fillRect(0,0,172,26);
       ctx.fillStyle="#f59e0b"; ctx.font="bold 13px monospace";
-      ctx.fillText(`${r.label}  ${Math.round(cw)}×${Math.round(ch)}`,14,24);
+      ctx.fillText(`${r.label}  ${Math.round(cropW)}×${Math.round(cropH)}`,10,18);
     };
     img.src = image;
   },[sel,image]);
   return (
     <div>
       <InfoBox>
-        The <strong>aspect ratio</strong> defines the proportional relationship between width and height. It determines framing, composition, and the emotional "feel" of the image. Cinematographers choose ratios deliberately — 2.39:1 feels epic and immersive; 1:1 feels intimate. The dashed amber line shows the <strong>action safe area</strong> (5% inset), critical for broadcast delivery (EBU R 95).
+        The <strong>aspect ratio</strong> defines the proportional relationship between width and height. It determines framing, composition, and the emotional "feel" of the image. Cinematographers choose ratios deliberately — 2.39:1 feels epic and immersive; 1:1 feels intimate. The image stays fixed; the <strong>semi-transparent letterbox</strong> shows what each ratio <em>crops away</em> from the same frame (top/bottom bars for wider ratios, side bars for taller ones). The dashed amber line is the <strong>action safe area</strong> (5% inset), critical for broadcast delivery (EBU R 95).
       </InfoBox>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
         {RATIOS.map((r,i)=>(
@@ -1060,12 +1062,15 @@ function ModuleShotTypes() {
       const fx=fc.getContext("2d");
       fx.drawImage(scene,0,0,fc.width,fc.height);
       const rx=crop.x*fc.width, ry=crop.y*fc.height, rw=crop.w*fc.width, rh=crop.h*fc.height;
-      fx.fillStyle="rgba(6,6,9,0.6)";
-      fx.fillRect(0,0,fc.width,ry);
-      fx.fillRect(0,ry+rh,fc.width,fc.height-(ry+rh));
-      fx.fillRect(0,ry,rx,rh);
-      fx.fillRect(rx+rw,ry,fc.width-(rx+rw),rh);
+      // Frame outline only (no dim overlay → no hard contrast line at the crop edge).
+      // Dark backing stroke keeps the amber frame readable on both sky and ground.
+      fx.strokeStyle="rgba(0,0,0,0.55)"; fx.lineWidth=4; fx.strokeRect(rx,ry,rw,rh);
       fx.strokeStyle="#f59e0b"; fx.lineWidth=2; fx.strokeRect(rx,ry,rw,rh);
+      // corner ticks
+      fx.strokeStyle="#f59e0b"; fx.lineWidth=2; const tk=Math.min(rw,rh)*0.12;
+      [[rx,ry,1,1],[rx+rw,ry,-1,1],[rx,ry+rh,1,-1],[rx+rw,ry+rh,-1,-1]].forEach(([px,py,sx,sy])=>{
+        fx.beginPath(); fx.moveTo(px+sx*tk,py); fx.lineTo(px,py); fx.lineTo(px,py+sy*tk); fx.stroke();
+      });
       fx.fillStyle="rgba(0,0,0,0.7)"; fx.fillRect(0,0,fc.width,26);
       fx.fillStyle="#f59e0b"; fx.font="bold 13px monospace";
       fx.fillText(`${S.label} — ${S.name}`,10,18);
