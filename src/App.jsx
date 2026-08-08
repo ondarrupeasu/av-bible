@@ -47,6 +47,11 @@ const STRINGS = {
       codecs: { title: "Compression & Codecs", desc: "Intra vs inter, DCT blocking, I/P/B frames, the codec table" },
       containers: { title: "Containers & Wrappers", desc: "MOV, MP4, MXF, MKV — codec ≠ container" },
       signals: { title: "Signals & Connectivity", desc: "HDMI, SDI, fibre, NDI, SRT, XLR, DMX — cables vs IP transports" },
+      lensDistortion: { title: "Lens Distortion", desc: "Barrel & pincushion — when straight lines bend" },
+      interlacing: { title: "Interlacing & Combing", desc: "Fields, comb teeth on motion, deinterlacing" },
+      halation: { title: "Halation & Bloom", desc: "Highlight glow — the red halo of film" },
+      flicker: { title: "Flicker & Rolling Bands", desc: "50/60 Hz and PWM LED — banding and flicker" },
+      focusBreathing: { title: "Focus Breathing", desc: "Field of view shifting as you rack focus" },
     },
   },
 };
@@ -67,7 +72,7 @@ const CATEGORIES = [
   },
   {
     id: "defects", label: T.categories.defects,
-    modules: ["rollingShutter","moire","banding","noise","vignetting","chromaticAberration"],
+    modules: ["rollingShutter","moire","banding","noise","vignetting","chromaticAberration","lensDistortion","interlacing","halation","flicker","focusBreathing"],
   },
   {
     id: "optics", label: T.categories.optics,
@@ -2822,6 +2827,265 @@ function ModuleSignals() {
 }
 
 // ─────────────────────────────────────────────
+// MODULE: Lens Distortion
+// ─────────────────────────────────────────────
+function ModuleLensDistortion({ image }) {
+  const [k,setK]=useState(0.28);
+  const [grid,setGrid]=useState(true);
+  const ref=useRef();
+  useEffect(()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const c=ref.current; if(!c)return;
+      const W=Math.min(c.parentElement?.clientWidth-32||640,640), H=Math.round(W*9/16);
+      c.width=W;c.height=H; const ctx=c.getContext("2d");
+      const src=document.createElement("canvas"); src.width=W;src.height=H; const sctx=src.getContext("2d");
+      sctx.drawImage(img,0,0,W,H);
+      if(grid){ sctx.strokeStyle="rgba(255,255,255,0.35)"; sctx.lineWidth=1;
+        for(let x=0;x<=W;x+=W/12){ sctx.beginPath();sctx.moveTo(x,0);sctx.lineTo(x,H);sctx.stroke(); }
+        for(let y=0;y<=H;y+=H/7){ sctx.beginPath();sctx.moveTo(0,y);sctx.lineTo(W,y);sctx.stroke(); } }
+      const sd=sctx.getImageData(0,0,W,H).data, out=ctx.createImageData(W,H), od=out.data;
+      const cx=W/2, cy=H/2, norm=Math.hypot(cx,cy);
+      for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+        const dx=(x-cx)/norm, dy=(y-cy)/norm, r2=dx*dx+dy*dy;
+        const f=1+k*r2;                       // +k barrel, −k pincushion
+        const sx=Math.round(cx+dx*f*norm), sy=Math.round(cy+dy*f*norm);
+        const o=(y*W+x)*4;
+        if(sx>=0&&sx<W&&sy>=0&&sy<H){ const s=(sy*W+sx)*4; od[o]=sd[s];od[o+1]=sd[s+1];od[o+2]=sd[s+2];od[o+3]=255; }
+        else { od[o]=8;od[o+1]=8;od[o+2]=11;od[o+3]=255; }
+      }
+      ctx.putImageData(out,0,0);
+      ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,W,22);ctx.font="11px monospace";ctx.fillStyle="#f87171";
+      ctx.fillText(`${k>0.02?"barrel":k<-0.02?"pincushion":"rectilinear"}  ·  k = ${k.toFixed(2)}`,8,14);
+    };
+    img.src=image;
+  },[k,grid,image]);
+  return (
+    <div>
+      <InfoBox>
+        <strong>Geometric distortion</strong> is a lens failing to keep straight lines straight. <strong>Barrel</strong> distortion bows lines <em>outward</em> (magnification falls toward the edges) — typical of wide-angle and fisheye lenses. <strong>Pincushion</strong> bows them <em>inward</em> — common at the long end of zooms. Many zooms are barrel at the wide end and pincushion at the tele end, passing through a near-perfect <em>rectilinear</em> point in between. It is corrected with lens profiles (in-camera or in post — Resolve, Lightroom, PTLens) using the model r′ = r(1 + k·r²). Watch the straight grid lines bow as you drag; the correction is simply the inverse warp.
+      </InfoBox>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+        <label style={styles.label}>
+          Distortion: <strong style={{color:"#f59e0b"}}>{k>0.02?"barrel":k<-0.02?"pincushion":"none"} ({k.toFixed(2)})</strong>
+          <input type="range" min={-0.4} max={0.4} step={0.01} value={k} onChange={e=>setK(+e.target.value)} style={{...styles.slider,width:220}}/>
+        </label>
+        <button onClick={()=>setGrid(g=>!g)} style={grid?styles.btnActive:styles.btnChip}>{grid?"Grid: ON":"Grid: OFF"}</button>
+      </div>
+      <div style={{background:"#111",borderRadius:8,padding:12}}><canvas ref={ref} style={{display:"block",width:"100%",borderRadius:4}}/></div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MODULE: Interlacing & Combing
+// ─────────────────────────────────────────────
+function ModuleInterlacing({ image }) {
+  const [motion,setMotion]=useState(14);
+  const [mode,setMode]=useState("interlaced");  // progressive | interlaced | bob
+  const ref=useRef();
+  useEffect(()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const c=ref.current; if(!c)return;
+      const W=Math.min(c.parentElement?.clientWidth-32||640,640), H=Math.round(W*9/16);
+      c.width=W;c.height=H; const ctx=c.getContext("2d");
+      // field 1 (even lines) at position 0, field 2 (odd lines) shifted by motion (captured 1/50s later)
+      const fA=document.createElement("canvas"); fA.width=W;fA.height=H; fA.getContext("2d").drawImage(img,0,0,W,H);
+      const fB=document.createElement("canvas"); fB.width=W;fB.height=H; fB.getContext("2d").drawImage(img,motion,0,W,H);
+      const a=fA.getContext("2d").getImageData(0,0,W,H).data, b=fB.getContext("2d").getImageData(0,0,W,H).data;
+      const out=ctx.createImageData(W,H), od=out.data;
+      for(let y=0;y<H;y++){
+        let srcData, useB=(y%2===1);
+        if(mode==="progressive") useB=false;
+        if(mode==="bob") useB=false;  // bob: drop one field, double the other (shown as line-doubled fieldA)
+        const row = (mode==="bob") ? (Math.floor(y/2)*2) : y;   // duplicate even lines
+        for(let x=0;x<W;x++){
+          const o=(y*W+x)*4; const sd = useB? b : a; const s=(row*W+x)*4;
+          od[o]=sd[s];od[o+1]=sd[s+1];od[o+2]=sd[s+2];od[o+3]=255;
+        }
+      }
+      ctx.putImageData(out,0,0);
+      ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,W,22);ctx.font="11px monospace";
+      ctx.fillStyle=mode==="interlaced"?"#f87171":"#34d399";
+      ctx.fillText(mode==="interlaced"?`INTERLACED — combing on motion (${motion}px/field)`:mode==="bob"?"BOB DEINTERLACE — one field, line-doubled":"PROGRESSIVE — whole frame at once",8,14);
+    };
+    img.src=image;
+  },[motion,mode,image]);
+  return (
+    <div>
+      <InfoBox>
+        <strong>Interlacing</strong> (the <em>i</em> in 1080<strong>i</strong>, 576<strong>i</strong>) splits every frame into two <strong>fields</strong> — the odd lines, then the even lines — captured a <em>fraction of a second apart</em>. On a CRT it looked smooth; on a progressive display, anything that moves shows <strong>combing</strong> — interleaved teeth where the two fields no longer line up. <strong>Deinterlacing</strong> fixes it: <em>weave</em> (just recombine — fine for static shots), <em>bob</em> (throw away one field and line-double the other — softer but no teeth), or motion-adaptive (the good, expensive one). Modern acquisition is progressive (1080p, 2160p); interlacing survives in broadcast legacy and archive. Drag <em>motion</em> to see the teeth grow, then switch to <em>bob</em> to remove them.
+      </InfoBox>
+      <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+        <div style={{display:"flex",gap:8}}>
+          {[["Progressive","progressive"],["Interlaced","interlaced"],["Bob deint.","bob"]].map(([lbl,v])=>(
+            <button key={v} onClick={()=>setMode(v)} style={mode===v?styles.btnActive:styles.btnChip}>{lbl}</button>
+          ))}
+        </div>
+        <label style={styles.label}>
+          Motion: <strong style={{color:"#f59e0b"}}>{motion}px/field</strong>
+          <input type="range" min={0} max={30} step={1} value={motion} onChange={e=>setMotion(+e.target.value)} style={{...styles.slider,width:180}}/>
+        </label>
+      </div>
+      <div style={{background:"#111",borderRadius:8,padding:12}}><canvas ref={ref} style={{display:"block",width:"100%",borderRadius:4}}/></div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MODULE: Halation & Bloom
+// ─────────────────────────────────────────────
+function ModuleHalation({ image }) {
+  const [thr,setThr]=useState(0.72);
+  const [amt,setAmt]=useState(0.7);
+  const [halo,setHalo]=useState(true);
+  const ref=useRef();
+  useEffect(()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const c=ref.current; if(!c)return;
+      const W=Math.min(c.parentElement?.clientWidth-32||640,640), H=Math.round(W*9/16);
+      c.width=W;c.height=H; const ctx=c.getContext("2d"); ctx.drawImage(img,0,0,W,H);
+      // extract highlights above threshold
+      const id=ctx.getImageData(0,0,W,H), d=id.data;
+      const hi=document.createElement("canvas"); hi.width=W;hi.height=H; const hc=hi.getContext("2d");
+      const hid=hc.createImageData(W,H), hd=hid.data;
+      for(let i=0;i<d.length;i+=4){ const l=luma709(d[i],d[i+1],d[i+2])/255;
+        const m=l>thr?(l-thr)/(1-thr):0;
+        if(halo){ hd[i]=Math.min(255,d[i]*m*1.1+40*m); hd[i+1]=d[i+1]*m*0.55; hd[i+2]=d[i+2]*m*0.4; } // reddish halation
+        else { hd[i]=d[i]*m; hd[i+1]=d[i+1]*m; hd[i+2]=d[i+2]*m; }                                    // neutral bloom
+        hd[i+3]=255;
+      }
+      hc.putImageData(hid,0,0);
+      // blur the highlight layer (progressive downscale) and screen it back
+      let cur=hi; const passes=3;
+      for(let p=0;p<passes;p++){ const nw=Math.max(2,cur.width>>1),nh=Math.max(2,cur.height>>1);
+        const t=document.createElement("canvas");t.width=nw;t.height=nh; const tc=t.getContext("2d");tc.imageSmoothingEnabled=true;tc.drawImage(cur,0,0,nw,nh); cur=t; }
+      ctx.globalCompositeOperation="screen"; ctx.globalAlpha=amt; ctx.imageSmoothingEnabled=true;
+      ctx.drawImage(cur,0,0,W,H); ctx.drawImage(cur,0,0,W,H);
+      ctx.globalAlpha=1; ctx.globalCompositeOperation="source-over";
+      ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,W,22);ctx.font="11px monospace";ctx.fillStyle="#f59e0b";
+      ctx.fillText(`${halo?"halation (red)":"bloom (neutral)"}  ·  threshold ${Math.round(thr*100)} IRE  ·  ${Math.round(amt*100)}%`,8,14);
+    };
+    img.src=image;
+  },[thr,amt,halo,image]);
+  return (
+    <div>
+      <InfoBox>
+        <strong>Bloom</strong> is light bleeding out of bright areas — glare scattering in the lens and around sensor photosites, so highlights glow past their edges. <strong>Halation</strong> is the film cousin: light passes through the emulsion, reflects off the film backing and re-exposes the surrounding grains — classically a <em>red/orange</em> ring around highlights (tungsten bulbs, sunlit windows, neon), because the red-sensitive layer sits deepest. Kodak Vision3 and stocks without an anti-halation layer show it strongly; it's now faked in post for a filmic look (and baked into looks like teal-and-orange grades). Push <em>threshold</em> to pick which highlights glow, <em>amount</em> for strength, and toggle the red halation tint vs neutral bloom.
+      </InfoBox>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+        <label style={styles.label}>Threshold: <strong style={{color:"#f59e0b"}}>{Math.round(thr*100)} IRE</strong>
+          <input type="range" min={0.3} max={0.95} step={0.01} value={thr} onChange={e=>setThr(+e.target.value)} style={{...styles.slider,width:160}}/></label>
+        <label style={styles.label}>Amount: <strong style={{color:"#f59e0b"}}>{Math.round(amt*100)}%</strong>
+          <input type="range" min={0} max={1} step={0.01} value={amt} onChange={e=>setAmt(+e.target.value)} style={{...styles.slider,width:160}}/></label>
+        <button onClick={()=>setHalo(h=>!h)} style={halo?styles.btnActive:styles.btnChip}>{halo?"Halation (red)":"Bloom (neutral)"}</button>
+      </div>
+      <div style={{background:"#111",borderRadius:8,padding:12}}><canvas ref={ref} style={{display:"block",width:"100%",borderRadius:4}}/></div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MODULE: Flicker & Rolling Bands
+// ─────────────────────────────────────────────
+function ModuleFlicker({ image }) {
+  const [freq,setFreq]=useState(50);
+  const [shutter,setShutter]=useState(180);
+  const [animate,setAnimate]=useState(true);
+  const ref=useRef();
+  useEffect(()=>{
+    const img=new Image(); let raf=0,t0=null,alive=true;
+    img.onload=()=>{
+      const c=ref.current; if(!c)return;
+      const W=Math.min(c.parentElement?.clientWidth-32||640,640), H=Math.round(W*9/16);
+      c.width=W;c.height=H; const ctx=c.getContext("2d");
+      const depth=0.42*(1-shutter/360)+0.12;               // shorter shutter → deeper bands
+      const cycles=freq/25;                                 // 50Hz≈2, 60Hz≈2.4 bands over the frame at 25fps
+      const draw=(ph)=>{
+        ctx.drawImage(img,0,0,W,H);
+        for(let y=0;y<H;y+=2){
+          const f=1-depth*0.5*(1+Math.sin(2*Math.PI*((y/H)*cycles - ph)));
+          ctx.fillStyle=`rgba(0,0,0,${Math.max(0,1-f)})`; ctx.fillRect(0,y,W,2);
+        }
+        ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,W,22);ctx.font="11px monospace";ctx.fillStyle="#f87171";
+        ctx.fillText(`${freq} Hz light  ·  ${shutter}° shutter  ·  rolling exposure bands`,8,14);
+      };
+      const loop=(t)=>{ if(!alive)return; if(t0==null)t0=t; draw(((t-t0)/1000)*0.7); raf=requestAnimationFrame(loop); };
+      if(animate){ raf=requestAnimationFrame(loop); } else { draw(0); }
+    };
+    img.src=image;
+    return ()=>{ alive=false; cancelAnimationFrame(raf); };
+  },[freq,shutter,animate,image]);
+  return (
+    <div>
+      <InfoBox>
+        <strong>Flicker</strong> comes from lights that pulse faster than the eye can see. Mains lighting runs at <strong>2× the grid frequency</strong> (100 Hz on 50 Hz mains, 120 Hz on 60 Hz); cheap <strong>LED and HMI</strong> fixtures pulse via PWM dimming. If the camera's exposure time isn't an exact multiple of that pulse, each frame — or, with a rolling shutter, each <em>band of scan lines</em> — catches a different part of the cycle, so you get <strong>rolling brightness bands</strong> or whole-frame flicker. The fix on set is to match up: shoot 50i/25p under 50 Hz, 60i/30p under 60 Hz, keep the shutter at a matching angle (172.8°/180°), or use flicker-free fixtures. Global-shutter and film cameras flicker as a whole frame; CMOS rolling shutters show the moving bands here.
+      </InfoBox>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+        <div style={{display:"flex",gap:8}}>
+          {[50,60].map(v=>(<button key={v} onClick={()=>setFreq(v)} style={freq===v?styles.btnActive:styles.btnChip}>{v} Hz</button>))}
+        </div>
+        <label style={styles.label}>Shutter angle: <strong style={{color:"#f59e0b"}}>{shutter}°</strong>
+          <input type="range" min={45} max={360} step={5} value={shutter} onChange={e=>setShutter(+e.target.value)} style={{...styles.slider,width:180}}/></label>
+        <button onClick={()=>setAnimate(a=>!a)} style={animate?styles.btnActive:styles.btnChip}>{animate?"Roll: ON":"Roll: OFF"}</button>
+      </div>
+      <div style={{background:"#111",borderRadius:8,padding:12}}><canvas ref={ref} style={{display:"block",width:"100%",borderRadius:4}}/></div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MODULE: Focus Breathing
+// ─────────────────────────────────────────────
+function ModuleFocusBreathing({ image }) {
+  const [focus,setFocus]=useState(0.5);
+  const [amount,setAmount]=useState(0.6);
+  const [animate,setAnimate]=useState(true);
+  const ref=useRef();
+  useEffect(()=>{
+    const img=new Image(); let raf=0,t0=null,alive=true;
+    img.onload=()=>{
+      const c=ref.current; if(!c)return;
+      const W=Math.min(c.parentElement?.clientWidth-32||640,640), H=Math.round(W*9/16);
+      c.width=W;c.height=H; const ctx=c.getContext("2d");
+      const draw=(fv)=>{
+        const scale=1+amount*0.16*(fv-0.5)*2;              // focus near → FOV narrows (image grows)
+        const dw=W*scale, dh=H*scale; ctx.fillStyle="#08080b"; ctx.fillRect(0,0,W,H);
+        ctx.drawImage(img,(W-dw)/2,(H-dh)/2,dw,dh);
+        // fixed frame reference (crop marks) so the breathing is visible
+        ctx.strokeStyle="rgba(255,255,255,0.5)"; ctx.lineWidth=1; const m=14, L=18;
+        [[m,m,1,1],[W-m,m,-1,1],[m,H-m,1,-1],[W-m,H-m,-1,-1]].forEach(([x,y,sx,sy])=>{
+          ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+sx*L,y);ctx.moveTo(x,y);ctx.lineTo(x,y+sy*L);ctx.stroke();
+        });
+        ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,W,22);ctx.font="11px monospace";ctx.fillStyle="#f59e0b";
+        ctx.fillText(`focus ${fv<0.45?"near":fv>0.55?"far":"mid"}  ·  FOV shift ${((scale-1)*100).toFixed(1)}%  (breathing)`,8,14);
+      };
+      const loop=(t)=>{ if(!alive)return; if(t0==null)t0=t; const fv=0.5+0.5*Math.sin((t-t0)/1000*1.1); draw(fv); raf=requestAnimationFrame(loop); };
+      if(animate){ raf=requestAnimationFrame(loop); } else { draw(focus); }
+    };
+    img.src=image;
+    return ()=>{ alive=false; cancelAnimationFrame(raf); };
+  },[focus,amount,animate,image]);
+  return (
+    <div>
+      <InfoBox>
+        <strong>Focus breathing</strong> is a lens changing its <em>field of view</em> as you rack focus — pull from a near subject to a far one and the framing subtly zooms. It happens because moving the focusing group also shifts the effective focal length. It's distracting on a focus pull and makes match-cuts and VFX plates harder, so <strong>cine lenses</strong> are engineered to minimise it (internal-focus designs, floating elements) — one of the things you pay for over stills glass. Some cameras now offer electronic <em>breathing compensation</em> (a slight digital crop that counteracts it). Watch the image creep past the fixed crop marks as focus rolls near↔far.
+      </InfoBox>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+        <label style={{...styles.label,opacity:animate?0.4:1}}>Focus: <strong style={{color:"#f59e0b"}}>{focus<0.45?"near":focus>0.55?"far":"mid"}</strong>
+          <input type="range" min={0} max={1} step={0.01} value={focus} disabled={animate} onChange={e=>setFocus(+e.target.value)} style={{...styles.slider,width:180}}/></label>
+        <label style={styles.label}>Breathing amount: <strong style={{color:"#f59e0b"}}>{Math.round(amount*100)}%</strong>
+          <input type="range" min={0} max={1} step={0.01} value={amount} onChange={e=>setAmount(+e.target.value)} style={{...styles.slider,width:160}}/></label>
+        <button onClick={()=>setAnimate(a=>!a)} style={animate?styles.btnActive:styles.btnChip}>{animate?"Auto rack: ON":"Auto rack: OFF"}</button>
+      </div>
+      <div style={{background:"#111",borderRadius:8,padding:12}}><canvas ref={ref} style={{display:"block",width:"100%",borderRadius:4}}/></div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // Module registry map
 // ─────────────────────────────────────────────
 const MODULE_COMPONENTS = {
@@ -2832,6 +3096,11 @@ const MODULE_COMPONENTS = {
   codecs: ModuleCodecs,
   containers: ModuleContainers,
   signals: ModuleSignals,
+  lensDistortion: ModuleLensDistortion,
+  interlacing: ModuleInterlacing,
+  halation: ModuleHalation,
+  flicker: ModuleFlicker,
+  focusBreathing: ModuleFocusBreathing,
   resolution: ModuleResolution,
   chromaSubsampling: ModuleChromaSubsampling,
   raw: ModuleRAW,
