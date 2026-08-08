@@ -1602,64 +1602,89 @@ function ModuleColorTemp() {
 // ─────────────────────────────────────────────
 // MODULE: RAW vs Compressed
 // ─────────────────────────────────────────────
-function ModuleRAW({ image }) {
+// Scene-linear test image with real headroom (sky/sun go well above 1.0)
+function rawSceneLinear(IW,IH){
+  const buf=new Float32Array(IW*IH*3);
+  for(let y=0;y<IH;y++) for(let x=0;x<IW;x++){
+    const p=(y*IW+x)*3, u=x/IW, v=y/IH; let r,g,b;
+    if(v<0.6){ // sky with cloud texture + a bright sun (into the headroom)
+      const base=0.5+(0.6-v)/0.6*2.0;
+      const cloud=0.55+0.45*(0.5+0.5*Math.sin(u*15+v*6))*(0.6+0.4*Math.sin(u*5-v*3));
+      let s=base*cloud;
+      const dd=Math.hypot(u-0.80,(v-0.17)*1.5); s+=Math.max(0,(0.11-dd))/0.11*4.5;
+      r=s*1.03; g=s; b=s*0.86;
+    } else { // ground with texture + a dark and a bright object (shadow/highlight detail)
+      const base=0.10+(v-0.6)/0.4*0.30;
+      const tex=0.8+0.35*Math.sin(u*26)*Math.sin(v*22+u*4);
+      r=base*tex*0.78; g=base*tex*0.92; b=base*tex*0.55;
+      if(Math.hypot(u-0.3,v-0.8)<0.06) { r*=0.25; g*=0.25; b*=0.25; }        // deep shadow
+      if(Math.hypot(u-0.62,v-0.82)<0.05){ r+=2.2; g+=2.2; b+=2.0; }          // specular highlight
+    }
+    buf[p]=Math.max(0,r); buf[p+1]=Math.max(0,g); buf[p+2]=Math.max(0,b);
+  }
+  return buf;
+}
+
+function ModuleRAW() {
   const [exposure, setExposure] = useState(0);
   const [mode, setMode] = useState("RAW");
-  const canvasRef = useRef();
+  const imgRef = useRef();
+  const wfRef = useRef();
+  const sceneRef = useRef(null);
+  const dimRef = useRef({IW:0,IH:0});
 
   useEffect(()=>{
-    const img=new Image();
-    img.onload=()=>{
-      const c=canvasRef.current; if(!c)return;
-      c.width=Math.min(c.parentElement?.clientWidth-32||840,840);
-      c.height=Math.round(c.width*9/16);
-      const ctx=c.getContext("2d");
-      ctx.drawImage(img,0,0,c.width,c.height);
-      const idata=ctx.getImageData(0,0,c.width,c.height);
-      const d=idata.data;
-      const gain=Math.pow(2,exposure);
-      for(let i=0;i<d.length;i+=4){
-        for(let ch=0;ch<3;ch++){
-          let v=d[i+ch]/255;
-          if(mode==="RAW"){
-            // RAW: linear headroom, recoverable highlights
-            v=Math.min(v*gain,1.0);
-          } else {
-            // 8-bit compressed: clipping, no headroom
-            v=Math.min(v,1.0);
-            v=Math.min(v*gain,1.0);
-            // add slight compression artifact noise
-            v=Math.round(v*255)/255;
-            if(exposure>1) v=Math.min(1,v+(Math.random()-0.5)*0.02);
-          }
-          d[i+ch]=Math.round(v*255);
-        }
+    const ic=imgRef.current, wc=wfRef.current; if(!ic||!wc) return;
+    const W=Math.min(ic.parentElement?.clientWidth-24||440,480);
+    const IW=Math.round(W), IH=Math.round(W*9/16);
+    ic.width=IW; ic.height=IH;
+    if(!sceneRef.current || dimRef.current.IW!==IW){ sceneRef.current=rawSceneLinear(IW,IH); dimRef.current={IW,IH}; }
+    const scene=sceneRef.current, gain=Math.pow(2,exposure);
+    const enc=v=> v<=0.0031308?12.92*v:1.055*Math.pow(v,1/2.4)-0.055;
+    const ictx=ic.getContext("2d"); const idata=ictx.createImageData(IW,IH); const d=idata.data;
+    const clip=new Uint8Array(IW*IH);
+    for(let p=0,i=0;p<IW*IH;p++,i+=4){
+      for(let ch=0;ch<3;ch++){
+        let lin=scene[p*3+ch];
+        if(mode!=="RAW") lin=Math.min(lin,1.0);   // compressed clips at capture (no headroom)
+        lin*=gain;                                  // exposure
+        let disp=lin; if(disp>=1){ disp=1; clip[p]=1; }
+        d[i+ch]=Math.round(enc(disp)*255);
       }
-      ctx.putImageData(idata,0,0);
-      // Highlight clipping indicator (zebra stripes at >95%)
-      if(exposure>0.5){
-        for(let i=0;i<d.length;i+=4){
-          if(d[i]>240&&d[i+1]>240&&d[i+2]>240){
-            const px=i/4;
-            const x=px%c.width, y=Math.floor(px/c.width);
-            if((x+y)%8<4){
-              ctx.fillStyle="rgba(255,0,0,0.7)";
-              ctx.fillRect(x,y,1,1);
-            }
-          }
-        }
-      }
-      ctx.fillStyle="rgba(0,0,0,0.7)"; ctx.fillRect(0,0,c.width,22);
-      ctx.fillStyle=mode==="RAW"?"#34d399":"#f87171"; ctx.font="bold 12px monospace";
-      ctx.fillText(`${mode} mode  |  EV ${exposure>=0?"+":""}${exposure}  |  ${mode==="RAW"?"Recoverable highlights":"Clipped, no recovery"}`,10,15);
-    };
-    img.src=image;
-  },[exposure,mode,image]);
+      d[i+3]=255;
+    }
+    // waveform from the displayed luma (before zebra)
+    const WW=W, WH=Math.round(W*0.6); wc.width=WW; wc.height=WH;
+    const acc=new Float32Array(WW*WH);
+    for(let y=0;y<IH;y++) for(let x=0;x<IW;x++){
+      const i=(y*IW+x)*4, lum=luma709(d[i],d[i+1],d[i+2])/255;
+      const wx=Math.floor(x/IW*WW), wy=Math.floor((WH-8)-lum*(WH-16));
+      if(wx>=0&&wx<WW&&wy>=0&&wy<WH) acc[wy*WW+wx]++;
+    }
+    // zebra on display-clipped highlights
+    for(let p=0,i=0;p<IW*IH;p++,i+=4){ if(clip[p]){ const x=p%IW,y=(p/IW)|0; if((x+y)%6<3){ d[i]=255;d[i+1]=45;d[i+2]=45; } } }
+    ictx.putImageData(idata,0,0);
+    ictx.fillStyle="rgba(0,0,0,0.7)"; ictx.fillRect(0,0,IW,20);
+    ictx.fillStyle=mode==="RAW"?"#34d399":"#f87171"; ictx.font="bold 11px monospace";
+    ictx.fillText(`${mode}  ·  EV ${exposure>=0?"+":""}${exposure}`,8,14);
+    // render waveform
+    const wctx=wc.getContext("2d"); const out=wctx.createImageData(WW,WH); const od=out.data;
+    for(let k=0;k<od.length;k+=4){ od[k]=7;od[k+1]=9;od[k+2]=13;od[k+3]=255; }
+    let mx=0; for(let k=0;k<acc.length;k++) if(acc[k]>mx)mx=acc[k]; const norm=mx*0.2+1e-6;
+    const col=mode==="RAW"?[120,230,150]:[240,120,120];
+    for(let k=0;k<acc.length;k++){ if(acc[k]<=0)continue; const t=Math.min(1,acc[k]/norm);
+      od[k*4]=Math.min(255,od[k*4]+col[0]*t); od[k*4+1]=Math.min(255,od[k*4+1]+col[1]*t); od[k*4+2]=Math.min(255,od[k*4+2]+col[2]*t); }
+    wctx.putImageData(out,0,0);
+    wctx.strokeStyle="rgba(255,255,255,0.07)"; wctx.fillStyle="#374151"; wctx.font="9px monospace"; wctx.lineWidth=1;
+    for(let pp=0;pp<=100;pp+=25){ const y=(WH-8)-(pp/100)*(WH-16); wctx.beginPath();wctx.moveTo(18,y);wctx.lineTo(WW,y);wctx.stroke(); wctx.fillText(pp+"",2,y+3); }
+    wctx.strokeStyle="rgba(248,113,113,0.55)"; const yc=(WH-8)-(WH-16); wctx.beginPath();wctx.moveTo(18,yc+0.5);wctx.lineTo(WW,yc+0.5);wctx.stroke();
+    wctx.fillStyle="rgba(248,113,113,0.9)"; wctx.fillText("clip",WW-26,yc+11);
+  },[exposure,mode]);
 
   return (
     <div>
       <InfoBox>
-        <strong>RAW</strong> is the unprocessed sensor data — each photosite value before demosaicing, white balance, or tone mapping. It preserves full bit depth (12–16 bit), full dynamic range latitude, and defers all processing decisions to post. <strong>Compressed formats</strong> (H.264, H.265, AVCHD) apply in-camera processing — white balance, noise reduction, sharpening, colour science — and then compress the result. The key difference for exposure: RAW retains highlight headroom (typically 2–3 stops above clipping for recovery). Compressed clips above the camera's baked knee curve — no recovery possible. This is why LOG profiles recorded to ProRes/BRAW/XAVC-I offer a middle ground: processed but higher bit depth and LOG tone curve preserving more of the sensor's range.
+        <strong>RAW</strong> keeps the unprocessed sensor data with <strong>highlight headroom</strong> — several stops of luminance sit <em>above</em> the display clip point, waiting to be pulled back. <strong>Compressed</strong> formats (H.264/H.265) bake the exposure and <em>clip at capture</em>: anything above white is thrown away for good. Here the scene is over-exposed (the sky and sun clip, shown by the red zebras). Now pull <strong>Exposure</strong> down and watch the <strong>waveform</strong>: in <span style={{color:"#34d399"}}>RAW</span> the highlights come back down <em>with detail</em> (the trace spreads out below the clip line — recovered cloud/sun texture). In <span style={{color:"#f87171"}}>H.264</span> the clipped highlights just move down as a <em>flat line</em> — no detail returns, because it was never recorded. LOG to ProRes/BRAW is the middle ground.
       </InfoBox>
       <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
         {["RAW","H.264"].map(m=>(
@@ -1670,13 +1695,19 @@ function ModuleRAW({ image }) {
         ))}
         <label style={styles.label}>
           Exposure: <strong style={{color:"#f59e0b"}}>{exposure>=0?"+":""}{exposure} EV</strong>
-          <input type="range" min={-3} max={3} step={0.5} value={exposure} onChange={e=>setExposure(+e.target.value)} style={styles.slider}/>
+          <input type="range" min={-5} max={2} step={0.5} value={exposure} onChange={e=>setExposure(+e.target.value)} style={{...styles.slider,width:200}}/>
         </label>
       </div>
-      <div style={{background:"#111",borderRadius:8,padding:16,display:"block",maxWidth:"100%"}}>
-        <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%"}}/>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{flex:"1 1 300px",minWidth:260,background:"#111",borderRadius:8,padding:12}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:6}}>IMAGE</div>
+          <canvas ref={imgRef} style={{display:"block",width:"100%",borderRadius:4}}/>
+        </div>
+        <div style={{flex:"1 1 260px",minWidth:220,background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12}}>
+          <div style={{color:mode==="RAW"?"#34d399":"#f87171",fontSize:10,fontFamily:"monospace",marginBottom:6,letterSpacing:"0.08em"}}>WAVEFORM (luma, IRE)</div>
+          <canvas ref={wfRef} style={{display:"block",width:"100%"}}/>
+        </div>
       </div>
-      <p style={styles.noteText}>📌 At +1.5 EV and above, red zebra stripes show clipped highlights. In RAW mode, those areas retain more recoverable headroom than compressed formats.</p>
     </div>
   );
 }
