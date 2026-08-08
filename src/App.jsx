@@ -43,6 +43,8 @@ const STRINGS = {
       exposureTriangle: { title: "Exposure Triangle", desc: "Shutter, aperture, ISO — and the trade-offs" },
       falseColor: { title: "False Color", desc: "Exposure mapped to an IRE colour palette" },
       lut: { title: "LUTs", desc: "1D & 3D lookup tables — technical vs creative looks" },
+      codecs: { title: "Compression & Codecs", desc: "Intra vs inter, DCT blocking, I/P/B frames, the codec table" },
+      containers: { title: "Containers & Wrappers", desc: "MOV, MP4, MXF, MKV — codec ≠ container" },
     },
   },
 };
@@ -55,7 +57,7 @@ const T = STRINGS.en;
 const CATEGORIES = [
   {
     id: "image", label: T.categories.image,
-    modules: ["aspectRatio","resolution","chromaSubsampling","raw","frameRate","exposureTriangle"],
+    modules: ["aspectRatio","resolution","chromaSubsampling","raw","codecs","containers","frameRate","exposureTriangle"],
   },
   {
     id: "color", label: T.categories.color,
@@ -2543,6 +2545,197 @@ function ModuleLUT({ image }) {
 }
 
 // ─────────────────────────────────────────────
+// MODULE: Compression & Codecs
+// ─────────────────────────────────────────────
+const CODEC_TABLE=[
+  {name:"H.264 / AVC", type:"Inter", comp:"DCT + motion pred.", depth:"8 (10 Hi10)", chroma:"4:2:0", alpha:"No", lic:"Licensed", use:"Delivery, streaming, cameras"},
+  {name:"H.265 / HEVC", type:"Inter", comp:"DCT + motion pred.", depth:"8/10/12", chroma:"4:2:0→4:4:4", alpha:"No", lic:"Licensed", use:"4K / HDR delivery"},
+  {name:"AV1", type:"Inter", comp:"DCT/ADST + pred.", depth:"8/10/12", chroma:"4:2:0→4:4:4", alpha:"No", lic:"Open · royalty-free", use:"Streaming (YouTube, Netflix)"},
+  {name:"VP9", type:"Inter", comp:"DCT + pred.", depth:"8/10/12", chroma:"4:2:0→4:4:4", alpha:"Yes", lic:"Open · royalty-free", use:"YouTube / WebM"},
+  {name:"ProRes", type:"Intra", comp:"DCT", depth:"10/12", chroma:"4:2:2 / 4:4:4", alpha:"Yes (4444)", lic:"Proprietary · Apple", use:"Editing / mastering"},
+  {name:"DNxHR / DNxHD", type:"Intra", comp:"DCT", depth:"8/10/12", chroma:"4:2:2 / 4:4:4", alpha:"Yes (444)", lic:"Open · SMPTE VC-3", use:"Editing / mastering"},
+  {name:"JPEG 2000", type:"Intra", comp:"Wavelet", depth:"8–16", chroma:"up to 4:4:4", alpha:"Yes", lic:"Open · ISO", use:"DCP (cinema), archive"},
+  {name:"Camera RAW (BRAW/R3D)", type:"Intra", comp:"Wavelet / proprietary", depth:"12–16 log", chroma:"CFA (pre-debayer)", alpha:"No", lic:"Proprietary", use:"Acquisition · max latitude"},
+];
+function drawGOP(canvas, mode){
+  const W=Math.min(canvas.parentElement?.clientWidth-24||640,640), H=150; canvas.width=W; canvas.height=H;
+  const ctx=canvas.getContext("2d"); ctx.clearRect(0,0,W,H);
+  const seq = mode==="intra" ? ["I","I","I","I","I","I","I","I"] : ["I","B","B","P","B","B","P","B","B","I"];
+  const n=seq.length, m=24, fw=(W-m*2)/n, fh=46, cy=H*0.52, col={I:"#f59e0b",P:"#60a5fa",B:"#a78bfa"};
+  const cx=i=>m+i*fw+fw/2;
+  // reference arrows
+  const refIdx=t=>{}; // computed inline below
+  const drawArrow=(x1,x2,up,c)=>{ const y0=up?cy-fh/2-4:cy+fh/2+4, peak=up?y0-26:y0+26, mid=(x1+x2)/2;
+    ctx.strokeStyle=c; ctx.lineWidth=1.4; ctx.beginPath(); ctx.moveTo(x1,y0); ctx.quadraticCurveTo(mid,peak,x2,y0); ctx.stroke();
+    const ang=Math.atan2(y0-peak,x2-mid); ctx.beginPath(); ctx.moveTo(x2,y0);
+    ctx.lineTo(x2-7*Math.cos(ang-0.5),y0-7*Math.sin(ang-0.5)); ctx.lineTo(x2-7*Math.cos(ang+0.5),y0-7*Math.sin(ang+0.5)); ctx.closePath(); ctx.fillStyle=c; ctx.fill();
+  };
+  if(mode!=="intra"){
+    for(let i=0;i<n;i++){
+      if(seq[i]==="P"){ let p=i-1; while(p>=0&&seq[p]==="B")p--; if(p>=0) drawArrow(cx(p),cx(i),false,"#60a5fa88"); }
+      if(seq[i]==="B"){ let a=i-1; while(a>=0&&seq[a]==="B")a--; let b=i+1; while(b<n&&seq[b]==="B")b++;
+        if(a>=0) drawArrow(cx(a),cx(i),true,"#a78bfa66"); if(b<n) drawArrow(cx(b),cx(i),true,"#a78bfa66"); }
+    }
+  }
+  seq.forEach((t,i)=>{ const x=cx(i)-fw*0.4, w=fw*0.8, y=cy-fh/2;
+    ctx.fillStyle=col[t]+"22"; ctx.fillRect(x,y,w,fh); ctx.strokeStyle=col[t]; ctx.lineWidth=2; ctx.strokeRect(x,y,w,fh);
+    ctx.fillStyle=col[t]; ctx.font="bold 17px monospace"; ctx.textAlign="center"; ctx.fillText(t,cx(i),cy+6);
+  });
+  ctx.textAlign="left"; ctx.font="10px monospace"; ctx.fillStyle="#6b7280";
+  ctx.fillText(mode==="intra"?"every frame a full keyframe — cut anywhere, big files":"I keyframe · P forward · B both ways · small files",m,H-8);
+}
+function ModuleCodecs({ image }) {
+  const [q,setQ]=useState(65);
+  const [gop,setGop]=useState("long");
+  const imgRef=useRef(), gopRef=useRef();
+  useEffect(()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const c=imgRef.current; if(!c)return;
+      const W=Math.min(c.parentElement?.clientWidth-32||600,600), H=Math.round(W*9/16);
+      c.width=W;c.height=H; const ctx=c.getContext("2d"); ctx.drawImage(img,0,0,W,H);
+      if(q<100){
+        const id=ctx.getImageData(0,0,W,H), d=id.data, blk=8;
+        const mix=Math.pow((100-q)/100,1.3)*0.92, levels=Math.max(3,Math.round(q/100*38)+3), step=255/(levels-1);
+        for(let by=0;by<H;by+=blk) for(let bx=0;bx<W;bx+=blk){
+          let sr=0,sg=0,sb=0,nn=0; const ye=Math.min(H,by+blk), xe=Math.min(W,bx+blk);
+          for(let y=by;y<ye;y++)for(let x=bx;x<xe;x++){const i=(y*W+x)*4; sr+=d[i];sg+=d[i+1];sb+=d[i+2];nn++;}
+          const mr=sr/nn,mg=sg/nn,mb=sb/nn;
+          for(let y=by;y<ye;y++)for(let x=bx;x<xe;x++){const i=(y*W+x)*4;
+            d[i]=Math.round((d[i]*(1-mix)+mr*mix)/step)*step;
+            d[i+1]=Math.round((d[i+1]*(1-mix)+mg*mix)/step)*step;
+            d[i+2]=Math.round((d[i+2]*(1-mix)+mb*mix)/step)*step;
+          }
+        }
+        ctx.putImageData(id,0,0);
+      }
+      ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,W,22);ctx.font="11px monospace";ctx.fillStyle="#f59e0b";
+      ctx.fillText(`bitrate/quality: ${q}%   ${q<25?"— heavy 8×8 DCT blocking":q<60?"— visible macroblocks":"— near-transparent"}`,8,14);
+    };
+    img.src=image;
+  },[q,image]);
+  useEffect(()=>{ if(gopRef.current) drawGOP(gopRef.current,gop); },[gop]);
+  return (
+    <div>
+      <InfoBox>
+        A <strong>codec</strong> (coder-decoder) shrinks video two ways. <strong>Spatial (intra)</strong> compression works <em>inside</em> one frame — a DCT (or wavelet) throws away detail the eye barely sees; too little bitrate and the <strong>8×8 blocks</strong> show up as <em>macroblocking</em>. <strong>Temporal (inter)</strong> compression works <em>between</em> frames: only an <span style={{color:"#f59e0b"}}>I-frame</span> is complete; <span style={{color:"#60a5fa"}}>P-frames</span> store just the change from the previous frame and <span style={{color:"#a78bfa"}}>B-frames</span> interpolate from both sides. <strong>Intra-only</strong> codecs (ProRes, DNxHR) make every frame an I-frame — huge files but you can cut on any frame; <strong>long-GOP</strong> codecs (H.264/265) are tiny but must decode a whole group, which is why they scrub badly on a timeline. The other axes that define a codec: <em>bit depth</em> (8/10/12), <em>chroma</em> (4:2:0…4:4:4), <em>alpha</em>, and <em>open vs licensed</em>.
+      </InfoBox>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start",marginBottom:16}}>
+        <div style={{flex:"1 1 300px",minWidth:280,background:"#111",borderRadius:8,padding:12}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:6}}>SPATIAL — bitrate vs blocking</div>
+          <canvas ref={imgRef} style={{display:"block",width:"100%",borderRadius:4}}/>
+          <label style={{...styles.label,marginTop:10}}>
+            Bitrate / quality: <strong style={{color:"#f59e0b"}}>{q}%</strong>
+            <input type="range" min={3} max={100} step={1} value={q} onChange={e=>setQ(+e.target.value)} style={{...styles.slider,width:"100%"}}/>
+          </label>
+        </div>
+        <div style={{flex:"1 1 300px",minWidth:280,background:"#0d1117",border:"1px solid #1f2937",borderRadius:8,padding:12}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:6}}>TEMPORAL — GOP structure</div>
+          <canvas ref={gopRef} style={{display:"block",width:"100%"}}/>
+          <div style={{display:"flex",gap:8,marginTop:10}}>
+            {[["Intra-only","intra"],["Long-GOP","long"]].map(([lbl,v])=>(
+              <button key={v} onClick={()=>setGop(v)} style={gop===v?styles.btnActive:styles.btnChip}>{lbl}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div style={{overflowX:"auto",background:"#0d1117",border:"1px solid #1f2937",borderRadius:8}}>
+        <table style={{borderCollapse:"collapse",width:"100%",fontSize:11.5,fontFamily:"monospace",minWidth:720}}>
+          <thead><tr style={{color:"#9ca3af",textAlign:"left"}}>
+            {["Codec","Type","Compression","Bit depth","Chroma","Alpha","Licence","Typical use"].map(h=>(
+              <th key={h} style={{padding:"8px 10px",borderBottom:"1px solid #1f2937",whiteSpace:"nowrap"}}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {CODEC_TABLE.map((r,i)=>(
+              <tr key={i} style={{color:"#d1d5db",background:i%2?"#0f1520":"transparent"}}>
+                <td style={{padding:"7px 10px",color:"#f3f4f6",fontWeight:"bold",whiteSpace:"nowrap"}}>{r.name}</td>
+                <td style={{padding:"7px 10px",color:r.type==="Intra"?"#f59e0b":"#60a5fa"}}>{r.type}</td>
+                <td style={{padding:"7px 10px"}}>{r.comp}</td>
+                <td style={{padding:"7px 10px"}}>{r.depth}</td>
+                <td style={{padding:"7px 10px"}}>{r.chroma}</td>
+                <td style={{padding:"7px 10px"}}>{r.alpha}</td>
+                <td style={{padding:"7px 10px",color:/Open/.test(r.lic)?"#34d399":"#f87171"}}>{r.lic}</td>
+                <td style={{padding:"7px 10px",color:"#9ca3af"}}>{r.use}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// MODULE: Containers / Wrappers
+// ─────────────────────────────────────────────
+const CONTAINERS=[
+  {ext:".mov", name:"QuickTime", lic:"Proprietary · Apple (spec public)", open:false,
+   video:["ProRes","H.264","H.265","DNxHR","Cineform"], audio:["PCM","AAC","ALAC (multi)"], subs:"Limited (CEA-608/708)", tc:"Yes — dedicated track", meta:"Rich (timecode, reels, LUTs)",
+   note:"The post-production standard on Mac. Holds almost any professional codec — a .mov can be ProRes or H.264, the extension tells you nothing about the codec."},
+  {ext:".mp4", name:"MPEG-4 Part 14", lic:"Open · ISO/IEC", open:true,
+   video:["H.264","H.265","AV1 (fMP4)"], audio:["AAC","MP3","AC-3"], subs:"Basic (tx3g)", tc:"Weak", meta:"Basic",
+   note:"The universal delivery / streaming wrapper — plays everywhere, but a narrow codec list. Not a mastering format."},
+  {ext:".mxf", name:"Material eXchange Format", lic:"Open · SMPTE", open:true,
+   video:["XDCAM","AVC-Intra","DNxHD","JPEG 2000","ProRes (OP1a)"], audio:["PCM — many channels"], subs:"Yes (captions/AS-11)", tc:"Yes — robust", meta:"Very rich (broadcast)",
+   note:"Broadcast & archive standard. Strict 'operational patterns' (OP1a…) keep facilities interoperable. Complex but bulletproof."},
+  {ext:".mkv", name:"Matroska", lic:"Open", open:true,
+   video:["Almost anything"], audio:["Anything, many tracks"], subs:"Excellent (SRT/ASS/PGS…)", tc:"Yes", meta:"Rich · chapters, attachments",
+   note:"The most flexible wrapper — but not a broadcast or post interchange standard. Beloved for distribution and multi-language files."},
+  {ext:".webm", name:"WebM", lic:"Open · royalty-free", open:true,
+   video:["VP8","VP9","AV1"], audio:["Vorbis","Opus"], subs:"WebVTT", tc:"No", meta:"Basic",
+   note:"A royalty-free subset of Matroska built for the open web (HTML5 <video>). Web-only in practice."},
+  {ext:".avi", name:"Audio Video Interleave", lic:"Proprietary · Microsoft (legacy)", open:false,
+   video:["DV","MJPEG","DivX/Xvid"], audio:["PCM","MP3"], subs:"No", tc:"No", meta:"Minimal",
+   note:"Legacy from 1992. No proper timecode, awkward past 4 GB, no modern metadata. Avoid for new work."},
+];
+function ContainerRow({label,value,accent}){
+  return (
+    <div style={{display:"flex",gap:10,padding:"7px 0",borderBottom:"1px solid #161c26",fontSize:12.5}}>
+      <span style={{color:"#6b7280",width:96,flexShrink:0,fontFamily:"monospace",fontSize:11}}>{label}</span>
+      <span style={{color:accent||"#d1d5db"}}>{Array.isArray(value)?value.join(" · "):value}</span>
+    </div>
+  );
+}
+function ModuleContainers() {
+  const [sel,setSel]=useState(".mov");
+  const c=CONTAINERS.find(x=>x.ext===sel)||CONTAINERS[0];
+  return (
+    <div>
+      <InfoBox>
+        A <strong>container</strong> (or <em>wrapper</em>) is the file on disk — the box. The <strong>codec</strong> is what's inside it. They are <em>independent</em>: the same H.264 stream can live in a <code>.mp4</code>, a <code>.mov</code> or a <code>.mkv</code>; a <code>.mov</code> might hold ProRes <em>or</em> H.264. <strong>So the extension never tells you the codec</strong> — that is the single most common confusion. A container's job is to <em>multiplex</em> several tracks — video, one or more audio tracks, subtitles, <strong>timecode</strong> and metadata — and keep them in sync. What separates them is <em>what they're allowed to carry</em> and <em>how well</em>: <code>.mp4</code> for universal delivery, <code>.mov</code>/<code>.mxf</code> for professional post and broadcast, <code>.mkv</code> for maximum flexibility.
+      </InfoBox>
+      <div style={{background:"#0f1a10",border:"1px solid #1f3a24",borderRadius:8,padding:"10px 14px",marginBottom:14,color:"#86efac",fontSize:13}}>
+        📦 <strong>Container ≠ codec.</strong> The box is not the same as what's inside it. <code>.mov</code> can hold ProRes or H.264 — you can't know from the extension alone.
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+        {CONTAINERS.map(x=>(
+          <button key={x.ext} onClick={()=>setSel(x.ext)} style={sel===x.ext?styles.btnActive:styles.btnChip}>{x.ext}</button>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-start"}}>
+        <div style={{flex:"1 1 320px",minWidth:300,background:"#0d1117",border:"1px solid #1f2937",borderRadius:10,padding:"14px 18px"}}>
+          <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:8}}>
+            <div><span style={{color:"#f59e0b",fontFamily:"monospace",fontSize:18,fontWeight:"bold"}}>{c.ext}</span> <span style={{color:"#9ca3af",fontSize:13}}>{c.name}</span></div>
+            <span style={{fontSize:11,fontFamily:"monospace",padding:"3px 8px",borderRadius:4,background:c.open?"#134e2a":"#4c1d1d",color:c.open?"#86efac":"#fca5a5"}}>{c.open?"OPEN":"PROPRIETARY"}</span>
+          </div>
+          <div style={{color:"#6b7280",fontSize:11,marginBottom:8}}>{c.lic}</div>
+          <ContainerRow label="🎬 video" value={c.video} accent="#93c5fd"/>
+          <ContainerRow label="🔊 audio" value={c.audio} accent="#fcd34d"/>
+          <ContainerRow label="💬 subtitles" value={c.subs}/>
+          <ContainerRow label="⏱ timecode" value={c.tc}/>
+          <ContainerRow label="🏷 metadata" value={c.meta}/>
+        </div>
+        <div style={{flex:"1 1 240px",minWidth:220,background:"#111",borderRadius:10,padding:"14px 18px",color:"#d1d5db",fontSize:13,lineHeight:1.7}}>
+          <div style={{color:"#6b7280",fontSize:10,fontFamily:"monospace",marginBottom:8,letterSpacing:"0.08em"}}>WHEN TO USE</div>
+          {c.note}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // Module registry map
 // ─────────────────────────────────────────────
 const MODULE_COMPONENTS = {
@@ -2550,6 +2743,8 @@ const MODULE_COMPONENTS = {
   exposureTriangle: ModuleExposureTriangle,
   falseColor: ModuleFalseColor,
   lut: ModuleLUT,
+  codecs: ModuleCodecs,
+  containers: ModuleContainers,
   resolution: ModuleResolution,
   chromaSubsampling: ModuleChromaSubsampling,
   raw: ModuleRAW,
