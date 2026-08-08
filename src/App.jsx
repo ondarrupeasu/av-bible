@@ -141,25 +141,20 @@ const SCENE_LAYERS = [
     ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(sunX,sunY,sunR*5,0,7); ctx.fill();
     ctx.fillStyle="#fdf3d4"; ctx.beginPath(); ctx.arc(sunX,sunY,sunR,0,7); ctx.fill();
   }},
-  { name:"mountains", depth:300, draw:(ctx,W,H)=>{   // atmospheric haze — desaturated, light
+  { name:"mountains", depth:300, draw:(ctx,W,H)=>{   // atmospheric haze; base fades to ground colour (no hard edge)
     const horizon=H*0.60;
-    ctx.fillStyle="#9fb0c0";
-    ctx.beginPath(); ctx.moveTo(0,horizon);
+    const g=ctx.createLinearGradient(0,H*0.42,0,horizon+2);
+    g.addColorStop(0,"#9fb0c0"); g.addColorStop(1,"#5a7048");
+    ctx.fillStyle=g;
+    ctx.beginPath(); ctx.moveTo(0,horizon+2);
     [[0,0.52],[0.15,0.45],[0.30,0.50],[0.46,0.43],[0.62,0.49],[0.80,0.46],[1,0.51]].forEach(([x,y])=>ctx.lineTo(x*W,y*H));
-    ctx.lineTo(W,horizon); ctx.closePath(); ctx.fill();
-  }},
-  { name:"hills", depth:110, draw:(ctx,W,H)=>{
-    const horizon=H*0.60;
-    ctx.fillStyle="#6a8468";
-    ctx.beginPath(); ctx.moveTo(0,horizon);
-    [[0,0.585],[0.25,0.555],[0.5,0.585],[0.75,0.555],[1,0.585]].forEach(([x,y])=>ctx.lineTo(x*W,y*H));
-    ctx.lineTo(W,horizon); ctx.closePath(); ctx.fill();
+    ctx.lineTo(W,horizon+2); ctx.closePath(); ctx.fill();
   }},
   { name:"ground", depth:30, draw:(ctx,W,H)=>{
     const horizon=H*0.60;
     const gnd=ctx.createLinearGradient(0,horizon,0,H);
     gnd.addColorStop(0,"#5a7048"); gnd.addColorStop(1,"#33452a");
-    ctx.fillStyle=gnd; ctx.fillRect(0,horizon,W,H-horizon);
+    ctx.fillStyle=gnd; ctx.fillRect(0,horizon-1,W,H-horizon+1);
     // road (perspective)
     const vpX=W*0.46;
     const rg=ctx.createLinearGradient(0,horizon,0,H);
