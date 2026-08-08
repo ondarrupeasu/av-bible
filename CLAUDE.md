@@ -55,15 +55,17 @@ imprescindible (ver más abajo). Orden acordado con el usuario:
 - **Escena compartida** `drawScene()` + `SCENE` (faceBox/bodyBox): nueva imagen por
   defecto coherente con figura humana; base para los rediseños de framing/movimiento.
 
-**EN CURSO / siguiente — Grupo 2 (rediseños sobre la escena):**
-- Shot Types: encuadres sobre la figura de la escena + recorte resultante.
-- Camera Movement: MISMA escena, todos los movimientos encima (dolly vs zoom real).
-- Depth of Field: desenfoque por distancia sobre elementos de la escena.
-- Aspect Ratio: imagen fija + letterbox semitransparente (mostrar qué se recorta).
-- Resolution: imagen dentro de marco que crece proporcional a la resolución.
-- Chroma Subsampling: patrón de test con bordes de color (el efecto no se ve hoy).
-- Color Temperature: dos ejes (WB de cámara con iconos × fuente de luz) → tinta.
-- Timecode: explicación visual del drop-frame.
+**HECHO — Grupo 2 (rediseños) + correcciones, todo en vivo:**
+- Escena compartida por capas (SCENE_LAYERS con depth) + art-dirección + horizonte sin costura.
+- Shot Types (encuadres sobre la escena, sin atenuado), Camera Movement (parallax dolly-vs-zoom
+  por capas), Depth of Field (desenfoque por distancia + VISTA LATERAL con banda de foco).
+- Aspect Ratio (imagen fija + letterbox semitransparente), Resolution (recuadros anidados a escala),
+  Chroma (lado a lado luma-sharp/croma-bloques), Color Temperature (dos ejes WB×fuente).
+- Timecode (explicación visual drop-frame). Banding sin slider. Rolling Shutter/Moiré responsive.
+- Color Spaces: 10 espacios (cámara verificados en colour-science) + auto-escala + responsive.
+  Picture Profiles: S-Log2/3 correctos, single-select. Color Science reordenado (Color Temp→…→ACES).
+- Scopes: PIP overlay sobre escena + histograma monocromo + Hue. RAW vs Compressed: waveform
+  (RAW recupera = spread; H.264 = línea recta clipada).
 
 **Módulos nuevos (Grupo 4, ampliado con ideas del usuario):**
 - LUT; False Color; Exposure Triangle (shutter/apertura/ISO sobre imagen real).
